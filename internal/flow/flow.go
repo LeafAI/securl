@@ -75,10 +75,13 @@ type Config struct {
 	Purpose  *Purpose
 	Keys     keyring.Source
 	Notifier Notifier
-	Tunnels  TunnelStarter
-	PageURL  string
-	TTL      time.Duration // per round
-	Grace    time.Duration // deprecated: the tunnel now closes when the page has read the outcome, or at OutcomeCap
+	// LinkViaAgent hands the link of every round to the agent (in the Snapshot) instead of the notifier, which is then
+	// never used. The person is no longer told by securl itself what is being asked, so the owner opts in to this.
+	LinkViaAgent bool
+	Tunnels      TunnelStarter
+	PageURL      string
+	TTL          time.Duration // per round
+	Grace        time.Duration // deprecated: the tunnel now closes when the page has read the outcome, or at OutcomeCap
 	// OutcomeCap is the longest the tunnel stays up after a login that ended while a page was listening (default
 	// 10 s): enough for the page's next poll to read the outcome. Every other ending closes the tunnel at once.
 	OutcomeCap time.Duration
@@ -145,6 +148,10 @@ type Snapshot struct {
 	Mode      string
 	Round     int
 	ExpiresAt time.Time
+	// Link and KeyCode are set only while a person is being waited for, and only when the manager hands the link to the
+	// agent (Config.LinkViaAgent) instead of sending it through the notifier. Both are empty in every other case.
+	Link    string
+	KeyCode string
 }
 
 type Result struct {
@@ -163,8 +170,11 @@ type Flow struct {
 	done   chan struct{}
 	result Result
 
-	mu   sync.Mutex
-	snap Snapshot
+	mu        sync.Mutex
+	snap      Snapshot
+	link      string // the link of the open round, kept only when it goes to the agent
+	keyCode   string
+	delivered string // the link that was last handed to the agent in a tool result
 
 	// lazily created by the first Ask
 	key    *keyring.Key
@@ -307,8 +317,40 @@ func (f *Flow) Result() Result { return f.result }
 func (f *Flow) Snapshot() Snapshot {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.snap
+	sn := f.snap
+	if sn.Phase == "waiting_human" {
+		sn.Link, sn.KeyCode = f.link, f.keyCode
+	}
+	return sn
 }
+
+// ClaimLink returns the snapshot and whether its link is one the agent has not been handed yet. A link that is handed
+// over is marked, so a call that only waits for the person blocks instead of returning the same link over and over.
+func (f *Flow) ClaimLink() (Snapshot, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sn := f.snap
+	if sn.Phase != "waiting_human" || f.link == "" {
+		return sn, false
+	}
+	sn.Link, sn.KeyCode = f.link, f.keyCode
+	fresh := f.link != f.delivered
+	f.delivered = f.link
+	return sn, fresh
+}
+
+// ViaAgent reports whether this flow hands its links to the agent.
+func (f *Flow) ViaAgent() bool { return f.m != nil && f.m.cfg.LinkViaAgent }
+
+// offerLink keeps the link of the open round for the agent to pass on.
+func (f *Flow) offerLink(link, keyCode string) {
+	f.mu.Lock()
+	f.link, f.keyCode = link, keyCode
+	f.mu.Unlock()
+}
+
+// withdrawLink drops the link once its round is over, so it is never handed out after the person has answered.
+func (f *Flow) withdrawLink() { f.offerLink("", "") }
 
 func (f *Flow) set(s Snapshot) {
 	f.mu.Lock()
@@ -507,6 +549,10 @@ func (f *Flow) Ask(ctx context.Context, mode string, fields []site.Field) (site.
 			title = replacementMark + " - " + title
 			note += "\n\n"
 		}
+		if f.m.cfg.LinkViaAgent {
+			f.offerLink(link, keyCode(f.key.Fingerprint()))
+			return nil
+		}
 		if err := f.m.cfg.Notifier.Markdown(ctx, title, message(f, mode, f.rounds, link, f.key.Fingerprint(), expires, note, f.m.cfg.Unlock != nil, f.m.cfg.Seal != nil)); err != nil {
 			return fmt.Errorf("%w: %s", ErrNotify, notify.Redact(err.Error()))
 		}
@@ -568,6 +614,9 @@ func (f *Flow) Ask(ctx context.Context, mode string, fields []site.Field) (site.
 				round.SetStatus(api.StateRejected, "")
 				return nil, &RejectedError{Reason: r.sub.Reason}
 			}
+			// Snapshot and ClaimLink show a link only in the waiting phase, so this is a second guard, not the first: it
+			// keeps the old link from being there if a later change ever shows it in another phase.
+			f.withdrawLink()
 			f.set(Snapshot{Phase: "working", Mode: mode, Round: f.rounds})
 			return site.Credentials(r.sub.Fields), nil
 		case <-f.tn.Done():
@@ -597,6 +646,7 @@ func (f *Flow) Ask(ctx context.Context, mode string, fields []site.Field) (site.
 //     right now.
 func (f *Flow) finish(sess *site.Session, err error) {
 	f.result = Result{Session: sess, Err: err}
+	f.withdrawLink()
 	f.set(Snapshot{Phase: "done"})
 	listening := false
 	if f.cur != nil {
@@ -651,21 +701,26 @@ func message(f *Flow, mode string, n int, link, fpr string, expires time.Time, n
 	if reason == "" {
 		reason = "(not given)"
 	}
-	short := strings.ToUpper(fpr)
-	if len(short) > 16 {
-		short = short[len(short)-16:]
-	}
-	var groups []string // "8885 4F38 DA77 58C0": identical to the verification code the page shows
-	for i := 0; i+4 <= len(short); i += 4 {
-		groups = append(groups, short[i:i+4])
-	}
-	short = strings.Join(groups, " ")
+	short := keyCode(fpr)
 	return note + fmt.Sprintf("### %s\n\n"+
 		"- **Step %d**: %s\n- **Requested by AI agent**: %s\n- **Expires**: %s\n- **Key code** (compare it with the page): `%s`\n\n"+
 		"%s"+
 		"[%s](%s)\n\n"+
 		"%s",
 		heading, n, step, reason, expires.Format("15:04:05"), short, codeNotes(unlockOn, sealOn), linkText, link, closing)
+}
+
+// keyCode is the verification code the page shows, "8885 4F38 DA77 58C0": the last 16 characters of the key's fingerprint.
+func keyCode(fpr string) string {
+	short := strings.ToUpper(fpr)
+	if len(short) > 16 {
+		short = short[len(short)-16:]
+	}
+	var groups []string
+	for i := 0; i+4 <= len(short); i += 4 {
+		groups = append(groups, short[i:i+4])
+	}
+	return strings.Join(groups, " ")
 }
 
 // purpose is the manager's Purpose, or nil for an ordinary login (also for a flow that has no manager, as in tests).

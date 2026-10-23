@@ -1432,3 +1432,174 @@ func TestRunningFindsTheLiveFlowOfASite(t *testing.T) {
 		t.Error("a finished flow is not running any more")
 	}
 }
+
+// failingNotifier would fail the login if it were ever asked: with the link going to the agent, nobody is notified.
+type failingNotifier struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (n *failingNotifier) Markdown(context.Context, string, string) error {
+	n.mu.Lock()
+	n.calls++
+	n.mu.Unlock()
+	return fmt.Errorf("the notifier must not be used")
+}
+
+func viaAgentManager(n Notifier, ts TunnelStarter) *Manager {
+	return NewManager(Config{Keys: keyring.NewMemoryPool(8, time.Hour), Notifier: n, Tunnels: ts, LinkViaAgent: true,
+		PageURL: "https://page.example/", TTL: time.Minute, Grace: time.Millisecond})
+}
+
+func TestWithTheLinkGoingToTheAgentTheNotifierIsNeverUsedAndTheSnapshotCarriesTheLink(t *testing.T) {
+	n := &failingNotifier{}
+	m := viaAgentManager(n, fakeTunnels{})
+	defer m.Close()
+	u, _ := url.Parse("https://site.example")
+	f := m.Start(stubDriver{}, u, "r", http.DefaultClient, nil)
+	waitFor(t, "the round to wait for a person", func() bool { return f.Snapshot().Phase == "waiting_human" })
+
+	sn := f.Snapshot()
+	if !strings.HasPrefix(sn.Link, "https://page.example/#") {
+		t.Fatalf("the snapshot must carry the link of the page: %q", sn.Link)
+	}
+	if len(sn.KeyCode) != 19 || strings.Count(sn.KeyCode, " ") != 3 {
+		t.Errorf("the key code is four groups of four, as the page shows it: %q", sn.KeyCode)
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.calls != 0 {
+		t.Errorf("the notifier was asked %d times", n.calls)
+	}
+}
+
+func TestTheLinkIsOnlyInTheSnapshotWhileAPersonIsBeingWaitedFor(t *testing.T) {
+	m := viaAgentManager(&failingNotifier{}, fakeTunnels{})
+	defer m.Close()
+	u, _ := url.Parse("https://site.example")
+	f := m.Start(stubDriver{}, u, "r", http.DefaultClient, nil)
+	waitFor(t, "the round to wait", func() bool { return f.Snapshot().Link != "" })
+	if !m.CancelBase("https://site.example") {
+		t.Fatal("cancel failed")
+	}
+	<-f.Done()
+	if sn := f.Snapshot(); sn.Link != "" || sn.KeyCode != "" {
+		t.Errorf("a finished flow must not hand out its link any more: %+v", sn)
+	}
+}
+
+func TestWithoutTheSwitchTheLinkNeverAppearsInTheSnapshot(t *testing.T) {
+	rec := &recNotifier{}
+	m := manager(t, rec, fakeTunnels{}, time.Minute)
+	defer m.Close()
+	u, _ := url.Parse("https://site.example")
+	f := m.Start(stubDriver{}, u, "r", http.DefaultClient, nil)
+	waitFor(t, "the message", func() bool { return len(rec.all()) == 1 })
+	if sn := f.Snapshot(); sn.Link != "" || sn.KeyCode != "" {
+		t.Errorf("the link goes to the notifier, not to the agent: %+v", sn)
+	}
+}
+
+func TestAReplacementLinkReplacesTheOneTheSnapshotCarries(t *testing.T) {
+	ts := &dyingTunnels{}
+	m := viaAgentManager(&failingNotifier{}, ts)
+	defer m.Close()
+	u, _ := url.Parse("https://site.example")
+	f := m.Start(stubDriver{}, u, "", http.DefaultClient, nil)
+	waitFor(t, "the first link", func() bool { return f.Snapshot().Link != "" })
+	first := f.Snapshot().Link
+	ts.started[0].Close()
+	waitFor(t, "a replacement link", func() bool { l := f.Snapshot().Link; return l != "" && l != first })
+}
+
+func TestAFailureOfThePageLinkStillStopsTheLoginWhenTheLinkGoesToTheAgent(t *testing.T) {
+	m := NewManager(Config{Keys: keyring.NewMemoryPool(8, time.Hour), Notifier: &failingNotifier{}, Tunnels: fakeTunnels{}, LinkViaAgent: true,
+		PageURL: "", TTL: time.Minute, Grace: time.Millisecond, Unlock: noCodes{}})
+	defer m.Close()
+	u, _ := url.Parse("https://site.example")
+	f := m.Start(stubDriver{}, u, "r", http.DefaultClient, nil)
+	select {
+	case <-f.Done():
+		if !errors.Is(f.Result().Err, ErrFactor) {
+			t.Fatalf("err = %v", f.Result().Err)
+		}
+	case <-time.After(waitLimit):
+		t.Fatal("a link that cannot be made must end the login, not leave the agent with nothing")
+	}
+}
+
+type noCodes struct{}
+
+func (noCodes) Window(from, to time.Time) []string { return nil }
+func (noCodes) Digits() int                        { return 8 }
+
+func TestTheKeyCodeIsTheLastSixteenCharactersOfTheFingerprintInGroupsOfFour(t *testing.T) {
+	for in, want := range map[string]string{
+		"0123456789abcdefFEDCBA9876543210": "FEDC BA98 7654 3210",
+		"abcd":                             "ABCD",
+		"":                                 "",
+	} {
+		if got := keyCode(in); got != want {
+			t.Errorf("keyCode(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Each of the two guards below is enough on its own to keep a link from being handed out after its round; they are tested
+// one at a time, because a test through the public Snapshot cannot tell which of them held.
+func TestTheLinkIsDroppedFromTheFlowWhenThePersonHasAnswered(t *testing.T) {
+	m := viaAgentManager(&failingNotifier{}, fakeTunnels{})
+	defer m.Close()
+	u, _ := url.Parse("https://site.example")
+	f := m.Start(stubDriver{}, u, "r", http.DefaultClient, nil)
+	waitFor(t, "the link", func() bool { return f.Snapshot().Link != "" })
+	if !m.CancelBase("https://site.example") {
+		t.Fatal("cancel failed")
+	}
+	<-f.Done()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.link != "" || f.keyCode != "" {
+		t.Errorf("the finished flow still keeps its link: %q %q", f.link, f.keyCode)
+	}
+}
+
+func TestAWithdrawnLinkIsNeitherShownNorClaimable(t *testing.T) {
+	f := &Flow{m: &Manager{}, snap: Snapshot{Phase: "waiting_human"}}
+	f.offerLink("https://page.example/#x", "AAAA BBBB CCCC DDDD")
+	f.withdrawLink()
+	if sn := f.Snapshot(); sn.Link != "" || sn.KeyCode != "" {
+		t.Errorf("%+v", sn)
+	}
+	if _, fresh := f.ClaimLink(); fresh {
+		t.Error("nothing to claim after the link was withdrawn")
+	}
+}
+
+func TestSnapshotOnlyShowsTheLinkWhileAPersonIsBeingWaitedFor(t *testing.T) {
+	for _, phase := range []string{"starting", "working", "done"} {
+		f := &Flow{m: &Manager{}, snap: Snapshot{Phase: phase}}
+		f.offerLink("https://page.example/#x", "AAAA BBBB CCCC DDDD")
+		if sn := f.Snapshot(); sn.Link != "" || sn.KeyCode != "" {
+			t.Errorf("phase %s shows the link: %+v", phase, sn)
+		}
+		if _, fresh := f.ClaimLink(); fresh {
+			t.Errorf("phase %s: a link may not be claimed", phase)
+		}
+	}
+}
+
+func TestALinkIsClaimedOnceAndAgainWhenItChanges(t *testing.T) {
+	f := &Flow{m: &Manager{}, snap: Snapshot{Phase: "waiting_human"}}
+	f.offerLink("https://page.example/#one", "AAAA")
+	if sn, fresh := f.ClaimLink(); !fresh || sn.Link != "https://page.example/#one" {
+		t.Fatalf("the first claim is fresh: %+v %v", sn, fresh)
+	}
+	if sn, fresh := f.ClaimLink(); fresh || sn.Link != "https://page.example/#one" {
+		t.Fatalf("the same link is not fresh again, but it is still shown: %+v %v", sn, fresh)
+	}
+	f.offerLink("https://page.example/#two", "AAAA")
+	if _, fresh := f.ClaimLink(); !fresh {
+		t.Error("a replacement link is fresh")
+	}
+}

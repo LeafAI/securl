@@ -74,6 +74,11 @@ type Security struct {
 	// change waits for a person's approval, is checked for DDL, notifies the approvers and counts against the limits.
 	// Through the request tool an agent could post or approve a workflow itself and skip all of that.
 	AllowArcheryRequests bool `yaml:"allow_archery_requests"`
+	// LinkViaAgent, with no DingTalk webhook configured, returns the login link to the agent in the tool result for the
+	// agent to show the person, instead of failing for want of a robot. Off by default. A configured webhook always wins.
+	// The cost, stated plainly: the person no longer reads a message that securl itself wrote, so what the agent says
+	// about the link is not checked by anything (see docs/OPERATING.md).
+	LinkViaAgent bool `yaml:"link_via_agent"`
 
 	// LinkTOTP is the unlock factor, a long-period TOTP: with it on, the site, the tunnel address and the one-shot
 	// password are encrypted in the DingTalk link and the person types its code in the page to read them. The default

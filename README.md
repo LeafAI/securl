@@ -105,6 +105,9 @@ exists only while a person is being asked.
 - The `request` tool refuses Archery, so an agent cannot post or approve a workflow itself and skip the approval, the
   DDL check and the limits that the `archery_*` tools apply. `security.allow_archery_requests: true` lifts it; it is
   the owner's switch, and it is off by default.
+- With no DingTalk robot, `security.link_via_agent: true` returns the login link to the agent to show the person. It is the
+  owner's switch and off by default. It gives up one thing: the person no longer reads a message that securl itself wrote, so
+  what the agent says about the link is not checked by anything. A configured robot always wins.
 - **Databases** (`databases:`) are reachable only by the names the owner lists; an agent supplies no host, port or
   connection string. The account is typed by a person on the usual page and kept in the vault, and the password is never in an answer,
   an error, the audit log or a message (a query that echoes it has it removed; the user name is not a secret and is not). A `read_only` target runs every statement
@@ -203,6 +206,7 @@ security:
   allowed_hosts: ["*.corp.example"]   # optional: the agent may only log in to matching hosts
   allow_local_addresses: false        # true lets the agent reach localhost / link-local / metadata addresses (dev only)
   allow_archery_requests: false       # true lets the request tool talk to Archery, which skips the approval gate of archery_run_sql
+  link_via_agent: false               # true, with no dingtalk.webhook: the login link is returned to the agent to show you (see docs/OPERATING.md)
 databases:                   # PostgreSQL / MySQL for dev, test or staging; `securl config db add` writes this
                              # production is refused (use Archery)
   - name: gm-dev-pg          # what an agent calls it; the agent never supplies a host or a port

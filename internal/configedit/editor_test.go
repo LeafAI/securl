@@ -390,3 +390,19 @@ func TestDatabasesAreNotSettableAsPlainValues(t *testing.T) {
 		}
 	}
 }
+
+func TestLinkViaAgentIsASettableBoolean(t *testing.T) {
+	ed, err := Open(filepath.Join(t.TempDir(), "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ed.Set("security.link_via_agent", "true"); err != nil {
+		t.Fatalf("the owner must be able to set the switch from the command line: %v", err)
+	}
+	if v, ok, _ := ed.Get("security.link_via_agent"); !ok || v != "true" {
+		t.Errorf("got %q %v", v, ok)
+	}
+	if err := ed.Set("security.link_via_agent", "maybe"); err == nil {
+		t.Error("a non-boolean must be rejected")
+	}
+}

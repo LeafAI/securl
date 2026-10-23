@@ -314,3 +314,29 @@ func TestDoctorIgnoresFilesInTheKeyDirectoryThatAreNotKeys(t *testing.T) {
 		t.Errorf("only login's own key files count:\n%s", out)
 	}
 }
+
+func TestDoctorSaysHowTheLinkReachesThePerson(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cfg      string
+		wantCode bool // a non-zero exit
+		want     string
+	}{
+		"no robot, no switch": {"limits: {per_site: 3}\n", true, "[FAIL] dingtalk webhook"},
+		"no robot, switch on": {"security: {link_via_agent: true}\n", false, "link_via_agent is on"},
+		"a robot":             {"dingtalk: {webhook: \"https://oapi.dingtalk.com/robot/send?access_token=abc\"}\n", false, "[ok  ] dingtalk webhook: configured"},
+	} {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "c.yaml")
+		os.WriteFile(p, []byte(tc.cfg), 0o600)
+		out, _ := capture(t, func() int { return runDoctor([]string{"-config", p}) })
+		if !strings.Contains(out, tc.want) {
+			t.Errorf("%s: output lacks %q:\n%s", name, tc.want, out)
+		}
+		if tc.wantCode && !strings.Contains(out, "securl config init") {
+			t.Errorf("%s: the failure must say how to fix it:\n%s", name, out)
+		}
+		if !tc.wantCode && strings.Contains(out, "FAIL] dingtalk webhook") {
+			t.Errorf("%s: this setup is fine:\n%s", name, out)
+		}
+	}
+}
