@@ -2,6 +2,8 @@ package main
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -63,10 +65,17 @@ func TestEveryToolTheSkillNamesExists(t *testing.T) {
 func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 	known := map[string]bool{
 		"config": true, "vault": true, "doctor": true, "page": true, "version": true,
+		// the tools, as commands
+		"session": true, "site": true, "db": true, "archery": true, "request": true, "serve": true, "daemon": true, "unlock": true,
 	}
 	sub := map[string]map[string]bool{
-		"config": {"init": true, "site": true, "show": true, "get": true, "set": true, "unset": true, "totp": true, "path": true, "db": true},
-		"vault":  {"init": true, "status": true, "passwd": true, "migrate": true},
+		"config":  {"init": true, "site": true, "show": true, "get": true, "set": true, "unset": true, "totp": true, "path": true, "db": true},
+		"vault":   {"init": true, "status": true, "passwd": true, "migrate": true},
+		"session": {"open": true, "wait": true, "list": true, "close": true},
+		"site":    {"list": true},
+		"daemon":  {"status": true},
+		"db":      {"targets": true, "query": true, "exec": true},
+		"archery": {"instances": true, "groups": true, "query": true, "run-sql": true, "wait": true, "workflow-status": true, "cancel": true},
 	}
 	siteSub := map[string]bool{"add": true, "custom": true, "list": true, "remove": true}
 	totpSub := map[string]bool{"init": true, "code": true, "status": true, "on": true, "off": true}
@@ -432,6 +441,35 @@ func TestSkillNeverTeachesAnAgentToHandleASecret(t *testing.T) {
 	} {
 		if !strings.Contains(s, must) {
 			t.Errorf("the skill must keep saying: %q", must)
+		}
+	}
+}
+
+// A command the skill, the README or the operator guide tells somebody to type is one the program really has, asked of the
+// program itself: the list of tool commands is not kept by hand here. `securl <group> <command> --help` answers 0 for a
+// command that exists, and 2 for one that does not.
+func TestEveryToolCommandTheDocumentsNameIsReal(t *testing.T) {
+	// in prose (`securl db query`) and in a code block (a line that starts with "securl ", or "$ securl ")
+	re := regexp.MustCompile("(?m)(?:`|^[ \\t]*(?:\\$ )?)securl ((?:session|site|db|archery) [a-z-]+|request)\\b")
+	seen := map[string]bool{}
+	for _, f := range documents {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range re.FindAllStringSubmatch(string(b), -1) {
+			seen[m[1]] = true
+		}
+	}
+	if len(seen) == 0 {
+		t.Fatal("no tool command is documented")
+	}
+	home := t.TempDir()
+	for cmd := range seen {
+		c := exec.Command(binary(t), append(strings.Fields(cmd), "--help")...)
+		c.Env = append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, "cfg"), "XDG_RUNTIME_DIR="+shortRuntimeDir(t))
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Errorf("the documents tell somebody to type `securl %s`, which is not a command: %v\n%s", cmd, err, out)
 		}
 	}
 }

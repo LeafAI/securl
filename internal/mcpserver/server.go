@@ -177,6 +177,18 @@ func (s *Server) Close() {
 	}
 }
 
+// Drain waits, for at most limit, for the tunnels of logins that have ended to close. A tunnel stays up for a moment after
+// its login ends so that the page the person typed into can read the outcome; a process that exits at once cuts that page
+// off, so a command that is about to exit calls this first. A server that keeps running never needs it.
+func (s *Server) Drain(limit time.Duration) {
+	s.mu.Lock()
+	c := s.core
+	s.mu.Unlock()
+	if c != nil {
+		c.mgr.Drain(limit)
+	}
+}
+
 func (s *Server) register(m *mcp.Server) error {
 	ro := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	open := func(idempotent bool) *mcp.ToolAnnotations {

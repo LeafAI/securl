@@ -189,6 +189,30 @@ carries `link`, `key_code` and `instruction`. Nothing was sent to anybody, so yo
 - A `pending` answer with no `link` means nothing new: keep waiting. If the user lost the link, call `session_wait` again: it
   answers with the same link.
 
+### Command line
+
+The same tools are commands, for the user's terminal or a script of theirs: `securl session open --url ...`,
+`securl request --url ... --method GET --path ...`, `securl db query --target ... --sql ...`. Run `securl <group> <command>
+--help` for the flags. The answer is JSON on standard output; progress is on standard error; exit `4` means a person has
+not answered yet (continue with `securl session wait --login-id ...`).
+
+- Prefer the MCP tools when you have them. Use the commands when the user asks for a command to run, or when you are the one
+  with a shell and no MCP connection.
+- **Never ask the user for the vault passphrase, and never put it in a command, a pipe or the environment.** In a terminal the
+  command asks for it itself. In your own shell there is no terminal, so the command opens the vault with a link for the user
+  and waits: tell the user to watch DingTalk.
+
+### Daemon
+
+`securl daemon` is a long-running server that the commands share: the vault is unlocked once, and a session one command makes
+is there for the next. `securl daemon status` says whether one runs. Commands use it on their own; `--no-daemon` runs one alone.
+
+- A locked daemon is opened by link (DingTalk, or `security.link_via_agent`): the user types the passphrase on the page.
+  `securl unlock` asks for that and waits; run it when a command answered `vault_locked` and the user is at their desk.
+  **Never pass a passphrase to a command to open a daemon: there is no way to, by design.**
+- Do not start a daemon on your own. It keeps the user's vault open for every process of their account, you included. If one is
+  not running and the user wants one, tell them to run `securl daemon` and to set `vault.idle_lock`.
+
 ### Archery SQL
 
 `archery_instances` and `archery_groups` list what the user may use. `archery_query` runs one read-only statement with no

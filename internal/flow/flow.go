@@ -185,6 +185,7 @@ type Flow struct {
 	rounds int
 
 	closeOnce sync.Once
+	closed    chan struct{} // closed when the tunnel and the API server are shut down
 }
 
 // shutdown stops the tunnel and API server (idempotent).
@@ -196,6 +197,7 @@ func (f *Flow) shutdown() {
 		if f.srv != nil {
 			f.srv.Close()
 		}
+		close(f.closed)
 	})
 }
 
@@ -220,7 +222,7 @@ func (m *Manager) Start(d site.Driver, base *url.URL, reason string, hc *http.Cl
 	rand.Read(idb[:])
 	ctx, cancel := context.WithCancel(context.Background())
 	f := &Flow{ID: "lg_" + hex.EncodeToString(idb[:]), Site: d.Name(), Base: base, Reason: reason,
-		m: m, cancel: cancel, done: make(chan struct{}), snap: Snapshot{Phase: "starting"}}
+		m: m, cancel: cancel, done: make(chan struct{}), closed: make(chan struct{}), snap: Snapshot{Phase: "starting"}}
 	m.flows[f.ID] = f
 	m.byBase[key] = f
 	m.mu.Unlock()
@@ -250,7 +252,7 @@ func (m *Manager) Start(d site.Driver, base *url.URL, reason string, hc *http.Cl
 
 // refused is a flow that never started: it is already done and carries the reason.
 func refused(d site.Driver, base *url.URL, reason string, err error) *Flow {
-	f := &Flow{Site: d.Name(), Base: base, Reason: reason, cancel: func() {}, done: make(chan struct{}),
+	f := &Flow{Site: d.Name(), Base: base, Reason: reason, cancel: func() {}, done: make(chan struct{}), closed: make(chan struct{}),
 		snap: Snapshot{Phase: "done"}, result: Result{Err: err}}
 	close(f.done)
 	return f
@@ -267,6 +269,29 @@ func (m *Manager) Get(id string) *Flow {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.flows[id]
+}
+
+// Drain waits, for at most limit, until every flow that has ended has also closed its tunnel. A flow that has ended keeps
+// its tunnel for a moment so that the page the person typed into can read the outcome (Config.OutcomeCap at most); a
+// process that is about to exit would otherwise cut that page off with "Lost contact with the login server" for a login
+// that has in fact succeeded. A flow that is still waiting for a person is not waited for: that is Close's to end.
+func (m *Manager) Drain(limit time.Duration) {
+	m.mu.Lock()
+	var ended []*Flow
+	for _, f := range m.flows {
+		if f.ended() {
+			ended = append(ended, f)
+		}
+	}
+	m.mu.Unlock()
+	deadline := time.After(limit)
+	for _, f := range ended {
+		select {
+		case <-f.closed:
+		case <-deadline:
+			return
+		}
+	}
 }
 
 // Close cancels every running flow and tears down all tunnels immediately.

@@ -42,7 +42,8 @@ const usage = `usage: securl vault <command>
   migrate   move anything an earlier version left in files into the vault (init does this once; run it again if more turns up)
 
 A running securl server starts locked. It is opened from your chat: the agent calls vault_unlock, you get a DingTalk
-link, and you type the passphrase on that page. There is no command that opens a running server.`
+link, and you type the passphrase on that page. For a running "securl daemon", "securl unlock" does the same from the
+terminal. No command takes the passphrase: it is typed on the page.`
 
 // Run executes one command and returns the exit code.
 func Run(args []string, env Env) int {
@@ -61,7 +62,7 @@ func Run(args []string, env Env) int {
 	case "migrate":
 		err = cmdMigrate(&env)
 	case "unlock", "lock":
-		err = fmt.Errorf("there is no `securl vault %s`: the key of the vault exists only in the memory of the process that opened it, so this command could not open a running server.\nA running server is opened remotely: the agent calls vault_unlock, you receive a DingTalk link and type the passphrase on its page", args[0])
+		err = fmt.Errorf("there is no `securl vault %s`: the key of the vault exists only in the memory of the process that opened it, so this command could not open a running server.\nA running server is opened remotely: the agent calls vault_unlock, you receive a DingTalk link and type the passphrase on its page.\nTo open the vault of a running `securl daemon` yourself, run `securl unlock`: it asks for the same link and waits", args[0])
 	default:
 		err = fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 	}

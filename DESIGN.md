@@ -378,6 +378,20 @@ MCP registration: `claude mcp add login -- login`.
   contain no credential. Replay protection via nonce+ts+round; token compared constant-time.
 - No tool result carries a cookie, token or authorization header: `request` injects them and scrubs the answer.
 - SSH host keys: `accept-new` trust-on-first-use.
+- **The daemon changes who can use an open vault.** Without it, the vault is open only inside one process, and that process is
+  the MCP server an agent talks to. With `securl daemon` the vault stays open in a long-running process, and **every process of
+  the same user can call its tools** over the socket: an agent's shell, a script, a build step, malware running as that user.
+  They get what any MCP client gets (sessions used on the owner's behalf, within the request policies, limits and audit), and
+  none of them gets a credential. What they do **not** get is a way in while the daemon is locked: the passphrase never crosses
+  the socket (a command asks the person by link, as an agent does), and no tool takes one. What bounds the exposure:
+  - the socket is a Unix socket made `0600` in a directory only the user can write (and refused otherwise), with the kernel's
+    own report of the peer's user checked on every connection (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED` on macOS); a TCP port
+    is not used because any user of the machine, and any web page, could reach it;
+  - the vault locks again after `vault.idle_lock`, and a stopped daemon takes the open vault with it;
+  - the daemon is not started on systems that cannot report the peer's user (Windows, other Unixes): there, every command runs
+    in a process of its own.
+  It does **not** defend against another process of the same user, by design: such a process can already read the user's files,
+  attach a debugger to the daemon, and read its memory. If that is in your threat model, do not run a daemon.
 
 ## 9. Milestones
 

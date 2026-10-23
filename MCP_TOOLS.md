@@ -4,6 +4,15 @@ Status: **implemented** (companion to `DESIGN.md`). Schemas are JSON Schema (dra
 in Go they are generated from tagged structs by the MCP SDK, so these definitions are the source
 for `internal/mcpserver/types.go`.
 
+## Command line
+
+Every tool except `vault_unlock` and `vault_status` is also a command of the same program: `securl <group> <command> --flags`
+(`archery_run_sql` is `securl archery run-sql`; `request` is `securl request`). The command starts this server in its own
+process and calls the tool over an in-memory MCP connection, so the tool is exactly the one an agent calls. The input fields are
+the flags (`--max-block-seconds`), read from the tool's input schema. The answer is the tool's output as one JSON document on
+standard output; exit code `0` answered, `1` a tool error (the error object is the output), `2` usage, `3` setup, `4` pending.
+See README, "From the command line".
+
 ## 0. Conventions
 
 **Tools (18)**
