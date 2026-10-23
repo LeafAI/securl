@@ -80,7 +80,8 @@ func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 	siteSub := map[string]bool{"add": true, "custom": true, "list": true, "remove": true}
 	totpSub := map[string]bool{"init": true, "code": true, "status": true, "on": true, "off": true}
 	dbSub := map[string]bool{"add": true, "list": true, "remove": true}
-	cmd := regexp.MustCompile("(?m)(?:^|[`$] *|\\| )securl ((?:[a-z]+)(?: [a-z]+)?(?: [a-z]+)?)")
+	// a word of a command may hold a hyphen (`archery run-sql`, `archery workflow-status`)
+	cmd := regexp.MustCompile("(?m)(?:^|[`$] *|\\| )securl ((?:[a-z]+)(?: [a-z][a-z-]*)?(?: [a-z]+)?)")
 	for _, m := range cmd.FindAllStringSubmatch(readSkill(t), -1) {
 		w := strings.Fields(m[1])
 		if !known[w[0]] {
@@ -614,6 +615,211 @@ func TestTheErrorCodesTheSkillNamesAreOnesTheServerSends(t *testing.T) {
 	for _, code := range []string{"close_pending", "bad_confirmation", "user_rejected", "rate_limited"} {
 		if !strings.Contains(src.String(), `"`+code+`"`) {
 			t.Errorf("the server does not send %q", code)
+		}
+	}
+}
+
+// ---- the command line reference ----
+//
+// The skill is the only manual an agent has for the command line, so it names every command and every flag, and the names come
+// from the program: a command or a flag that is added and not written down fails here.
+
+// toolCommands asks the program which tool commands exist. It reads the same catalogue the commands are run from.
+func toolCommands(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile("internal/mcpserver/names.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, m := range regexp.MustCompile(`tool[A-Za-z]+ += "([a-z]+_[a-z_]+|request)"`).FindAllStringSubmatch(string(b), -1) {
+		name := m[1]
+		if name == "vault_status" || name == "vault_unlock" {
+			continue // not commands: `securl vault status` is its own command and unlock is `securl unlock`
+		}
+		if name == "request" {
+			out = append(out, "request")
+			continue
+		}
+		g, s, _ := strings.Cut(name, "_")
+		out = append(out, g+" "+strings.ReplaceAll(s, "_", "-"))
+	}
+	for _, n := range []string{"archery_instances", "archery_groups", "archery_query", "archery_run_sql", "archery_wait", "archery_workflow_status", "archery_cancel"} {
+		g, s, _ := strings.Cut(n, "_")
+		out = append(out, g+" "+strings.ReplaceAll(s, "_", "-"))
+	}
+	seen := map[string]bool{}
+	var uniq []string
+	for _, c := range out {
+		if !seen[c] {
+			seen[c] = true
+			uniq = append(uniq, c)
+		}
+	}
+	return uniq
+}
+
+func commandSection(t *testing.T) string {
+	t.Helper()
+	s := readSkill(t)
+	i := strings.Index(s, "### Command line reference")
+	if i < 0 {
+		t.Fatal("the skill has no \"### Command line reference\" section")
+	}
+	rest := s[i+3:]
+	if j := strings.Index(rest, "\n## "); j >= 0 {
+		rest = rest[:j]
+	}
+	if j := strings.Index(rest, "\n### "); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest
+}
+
+func TestTheCommandLineReferenceNamesEveryToolCommand(t *testing.T) {
+	cmds := toolCommands(t)
+	if len(cmds) < 15 {
+		t.Fatalf("only %d tool commands were found: %v", len(cmds), cmds)
+	}
+	ref := commandSection(t)
+	for _, c := range cmds {
+		// both ways it is looked up: the table that maps a tool to its command, and the entry that gives its flags
+		if !strings.Contains(ref, "| `securl "+c+"` |") {
+			t.Errorf("the table of the reference has no row for `securl %s`", c)
+		}
+		if !strings.Contains(ref, "- `securl "+c+" ") && !strings.Contains(ref, "- `securl "+c+"`") {
+			t.Errorf("the reference has no entry for `securl %s`", c)
+		}
+	}
+}
+
+func TestTheCommandLineReferenceNamesEveryFlagOfEveryToolCommand(t *testing.T) {
+	ref := commandSection(t)
+	home := t.TempDir()
+	flagRE := regexp.MustCompile(`(?m)^\s+(--[a-z0-9-]+)`)
+	for _, cmd := range toolCommands(t) {
+		c := exec.Command(binary(t), append(strings.Fields(cmd), "--help")...)
+		c.Env = append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, "cfg"), "XDG_RUNTIME_DIR="+shortRuntimeDir(t))
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("securl %s --help: %v\n%s", cmd, err, out)
+		}
+		// the part of the reference that is about this command: the bullet that starts with it, up to the next bullet
+		i := strings.Index(ref, "- `securl "+cmd)
+		if i < 0 {
+			t.Errorf("the reference has no entry that starts with `securl %s`", cmd)
+			continue
+		}
+		part := ref[i+2:]
+		if j := regexp.MustCompile(`\n- `).FindStringIndex(part); j != nil {
+			part = part[:j[0]]
+		}
+		for _, f := range flagRE.FindAllStringSubmatch(string(out), -1) {
+			if !strings.Contains(part, f[1]) {
+				t.Errorf("`securl %s` has the flag %s, which its entry in the reference does not name", cmd, f[1])
+			}
+		}
+	}
+}
+
+func TestTheCommandLineReferenceSaysHowValuesAreGiven(t *testing.T) {
+	ref := commandSection(t)
+	for _, want := range []string{
+		"--json",         // a JSON body
+		"--header",       // name=value, given again for more
+		"--query",        // name=value
+		"--form",         // name=value
+		"@",              // @file
+		"standard input", // -
+		"--wait=false",
+		"-config",
+		"--no-daemon",
+	} {
+		if !strings.Contains(ref, want) {
+			t.Errorf("the reference does not explain %q", want)
+		}
+	}
+}
+
+func TestTheCommandLineReferenceGivesTheExitCodesAndTheStreams(t *testing.T) {
+	ref := commandSection(t)
+	for code, meaning := range map[string]string{"`0`": "answer", "`1`": "error", "`2`": "usage", "`3`": "setup|vault|configuration", "`4`": "person"} {
+		i := strings.Index(ref, "  - "+code+":") // the entry of the list of exit codes, not a mention of the number elsewhere
+		if i < 0 {
+			t.Errorf("the reference does not give the exit code %s", code)
+			continue
+		}
+		// the meaning is in the same bullet (and its continuation line): up to the next bullet
+		end := len(ref)
+		if j := strings.Index(ref[i:], "\n  - "); j >= 0 {
+			end = i + j
+		}
+		if !regexp.MustCompile(`(?is)` + meaning).MatchString(ref[i:min(end, i+240)]) {
+			t.Errorf("exit code %s is not followed by what it means (%s)", code, meaning)
+		}
+	}
+	for _, want := range []string{"standard output", "standard error"} {
+		if !strings.Contains(ref, want) {
+			t.Errorf("the reference does not say what goes to %s", want)
+		}
+	}
+}
+
+func TestTheSkillNamesTheCommandsThatAreNotToolsToo(t *testing.T) {
+	// what the command line has besides the tools is in the reference, where somebody who looks for a command looks
+	ref := commandSection(t)
+	for _, c := range []string{
+		"securl vault init", "securl vault status", "securl vault passwd", "securl vault migrate", "securl unlock", "securl daemon",
+		"securl daemon status", "securl daemon install", "securl daemon uninstall", "securl doctor", "securl page", "securl serve",
+		"securl version", "securl config get", "securl config unset", "securl config path", "securl config site list",
+		"securl config site remove",
+	} {
+		if !strings.Contains(ref, "`"+c) {
+			t.Errorf("the command line reference never names `%s`", c)
+		}
+	}
+	// and the ones that belong to setting up are where setting up is described
+	s := readSkill(t)
+	for _, c := range []string{"securl config init", "securl config show", "securl config set", "securl config site add", "securl config db add", "securl config db list", "securl config db remove", "securl config totp"} {
+		if !strings.Contains(s, c) {
+			t.Errorf("the skill never names `%s`", c)
+		}
+	}
+}
+
+// The README is where a person looks first: it lists every command by the tool it runs, as the skill does.
+func TestTheReadmeListsEveryToolCommand(t *testing.T) {
+	b, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	i := strings.Index(s, "## From the command line")
+	if i < 0 {
+		t.Fatal("the README has no \"From the command line\" section")
+	}
+	sec := s[i:]
+	if j := strings.Index(sec[3:], "\n## "); j >= 0 {
+		sec = sec[:j+3]
+	}
+	groups := map[string][]string{}
+	for _, c := range toolCommands(t) {
+		g, sub, _ := strings.Cut(c, " ")
+		groups[g] = append(groups[g], sub)
+	}
+	for g, subs := range groups {
+		for _, sub := range subs {
+			if g == "request" {
+				continue
+			}
+			if !strings.Contains(sec, sub) {
+				t.Errorf("the README's command line section never names `securl %s %s`", g, sub)
+			}
+		}
+	}
+	for _, want := range []string{"securl request", "securl page", "--wait=false", "-config", "--no-daemon", "securl vault", "securl unlock", "securl daemon"} {
+		if !strings.Contains(sec, want) {
+			t.Errorf("the README's command line section does not name %q", want)
 		}
 	}
 }
