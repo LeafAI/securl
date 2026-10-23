@@ -16,8 +16,20 @@ import (
 var (
 	builtOnce sync.Once
 	builtPath string
+	builtDir  string
 	builtErr  error
 )
+
+// TestMain removes the binaries that the tests of this package build once and share: they are not made with t.TempDir(), which
+// goes when the first test that asked for it ends, so without this each run leaves them in the temporary directory.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if builtDir != "" {
+		os.RemoveAll(builtDir)
+	}
+	removeLaunchctlTestBinary()
+	os.Exit(code)
+}
 
 // binary builds the program once for the tests that must run the real thing: what `securl` does with its arguments is
 // decided in main, which a test cannot call without exiting.
@@ -29,6 +41,7 @@ func binary(t *testing.T) string {
 			builtErr = err
 			return
 		}
+		builtDir = dir
 		builtPath = filepath.Join(dir, "securl")
 		if out, err := exec.Command("go", "build", "-o", builtPath, ".").CombinedOutput(); err != nil {
 			builtErr = &buildError{string(out), err}
@@ -107,7 +120,7 @@ func TestServeIsTheSameServerByName(t *testing.T) {
 // A command is not the server: it must run, print and exit, never wait on stdin as the server does.
 func TestACommandRunsAndExitsInsteadOfServing(t *testing.T) {
 	home := t.TempDir()
-	cmd := exec.Command(binary(t), "site", "list")
+	cmd := exec.Command(binary(t), "session", "list")
 	cmd.Env = append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, "cfg"), "XDG_RUNTIME_DIR="+shortRuntimeDir(t))
 	cmd.Stdin = strings.NewReader("")
 	done := make(chan error, 1)
@@ -170,8 +183,8 @@ func TestServeReadsTheConfigFileGivenAfterIt(t *testing.T) {
 }
 
 // shortRuntimeDir is an empty runtime directory for a program the tests run, so that its default daemon socket is one that
-// nobody listens on. Without it a test that runs a command talks to the daemon of whoever runs the tests (the default socket is
-// per user, not per HOME), and what it does there is done on their vault. It is short: socket paths are limited.
+// nobody listens on. Without it a test that runs `securl session list` talks to the daemon of whoever runs the tests (the default
+// socket is per user, not per HOME), and what it does there is done on their vault. It is short: socket paths are limited.
 func shortRuntimeDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "sr")

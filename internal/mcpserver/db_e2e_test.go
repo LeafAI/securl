@@ -1,6 +1,7 @@
 package mcpserver_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -104,7 +105,7 @@ func TestDatabaseEndToEnd(t *testing.T) {
 			if strings.Contains(string(raw), tc.pass) {
 				t.Error("the audit log carries the password")
 			}
-			if out, _ := e.call(t, "session_close", map[string]any{"url": "db://dev"}); out["removed"] != float64(1) {
+			if out := closeConfirmed(t, e, "db://dev"); out["removed"] != float64(1) {
 				t.Errorf("%v", out)
 			}
 			if out, isErr := q("SELECT 1"); !isErr || out["code"] != "no_session" {
@@ -177,7 +178,7 @@ func TestTwoTargetsOfOneEngineEachKeepTheirOwnAccountEndToEnd(t *testing.T) {
 				t.Errorf("each target must connect as its own account: %v", got)
 			}
 			// Closing one leaves the other.
-			e.call(t, "session_close", map[string]any{"url": "db://reader"})
+			closeConfirmed(t, e, "db://reader")
 			if out, isErr := e.call(t, "db_query", map[string]any{"target": "reader", "sql": "SELECT 1"}); !isErr || out["code"] != "no_session" {
 				t.Errorf("%v", out)
 			}
@@ -236,4 +237,19 @@ func docker(t *testing.T, args ...string) {
 	if out, err := exec.Command("docker", args...).CombinedOutput(); err != nil {
 		t.Skipf("docker %v: %v: %s (the servers are not containers of this machine)", args, err, out)
 	}
+}
+
+// closeConfirmed closes one saved session the way it is closed: the call asks, a person types the word on the page, and the
+// call is made again with the id it was given.
+func closeConfirmed(t *testing.T, e *env, url string) map[string]any {
+	t.Helper()
+	n := len(e.rec.all())
+	out, _ := e.call(t, "session_close", map[string]any{"url": url, "max_block_seconds": 1})
+	if out["status"] != "pending" {
+		t.Fatalf("closing is not asked for confirmation: %v", out)
+	}
+	vals, _ := json.Marshal(map[string]string{"confirm": "DELETE"})
+	human(t, e.rec.wait(t, n+1), e.dir, "submit", string(vals), "")
+	res, _ := e.call(t, "session_close", map[string]any{"url": url, "close_id": out["login_id"], "max_block_seconds": 20})
+	return res
 }

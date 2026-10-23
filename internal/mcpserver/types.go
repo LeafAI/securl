@@ -151,12 +151,23 @@ type SessionsOutput struct {
 }
 
 type LogoutInput struct {
-	URL string `json:"url,omitempty"`
-	All bool   `json:"all,omitempty"`
+	URL             string `json:"url,omitempty" jsonschema:"The site (or db://target) whose saved session is to be closed. Give this or all."`
+	All             bool   `json:"all,omitempty" jsonschema:"Close every saved session. Give this or url."`
+	Reason          string `json:"reason,omitempty" jsonschema:"Why the sessions are to be closed; shown to the person who is asked to confirm."`
+	CloseID         string `json:"close_id,omitempty" jsonschema:"The close_id of a pending confirmation, to keep waiting for it. Leave empty to ask for one."`
+	MaxBlockSeconds int    `json:"max_block_seconds,omitempty" jsonschema:"Override the default blocking time (1-600)."`
 }
 
+// LogoutOutput is the state of a request to close sessions. Saved sessions are closed only after a person has confirmed on
+// a page; until then the answer is pending and nothing has been closed.
 type LogoutOutput struct {
-	Removed int `json:"removed"`
+	Status     string `json:"status"` // closed | pending
+	Removed    int    `json:"removed"`
+	LoginID    string `json:"login_id,omitempty"` // the close_id to pass to the next call
+	WaitingFor string `json:"waiting_for,omitempty"`
+	ExpiresAt  string `json:"expires_at,omitempty"`
+	NextTool   string `json:"next_tool,omitempty"`
+	LinkHandover
 }
 
 // Archery

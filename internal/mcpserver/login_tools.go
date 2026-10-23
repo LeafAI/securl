@@ -107,9 +107,10 @@ func (s *Server) ensureLogin(ctx context.Context, req *mcp.CallToolRequest, raw,
 			// would replace an account that is good.
 			return nil, sessionLost(err, base.Host, "", "")
 		}
-	} else {
-		c.cache.Delete(session.Key(base))
 	}
+	// A forced login does not delete the saved session first. It is replaced when the new login has succeeded (Put), and kept
+	// when the person rejects, does not answer, or types something the site refuses: erasing it at the start would make
+	// force_refresh a way to close a session (a database account, which nobody can give back) without session_close's question.
 	f := c.mgr.Start(d, base, reason, s.hc, func(f *flow.Flow, r flow.Result) {
 		var rj *flow.RejectedError
 		switch {
@@ -288,41 +289,6 @@ func (s *Server) sessions(_ context.Context, _ *mcp.CallToolRequest, _ Empty) (a
 			ObtainedAt: fmtTime(e.ObtainedAt), ExpiresAt: fmtTime(e.Session.ExpiresAt), LastValidatedAt: fmtTime(e.ValidatedAt)})
 	}
 	return out, nil
-}
-
-func (s *Server) logout(_ context.Context, _ *mcp.CallToolRequest, in LogoutInput) (any, *ToolError) {
-	c, terr := s.gate()
-	if terr != nil {
-		return nil, terr
-	}
-	switch {
-	case in.All && in.URL != "", !in.All && in.URL == "":
-		return nil, errf("invalid_argument", false, "give exactly one of url or all")
-	case in.All:
-		return LogoutOutput{Removed: c.cache.Clear()}, nil
-	}
-	var base *url.URL
-	if strings.HasPrefix(strings.ToLower(in.URL), dbsite.Scheme+":") {
-		_, b, terr := s.databaseTarget(in.URL)
-		if terr != nil {
-			return nil, terr
-		}
-		base = b
-	} else {
-		b, terr := baseOf(in.URL)
-		if terr != nil {
-			return nil, terr
-		}
-		base = s.root(b)
-	}
-	n := 0
-	if c.cache.Delete(session.Key(base)) {
-		n++
-	}
-	if c.mgr.CancelBase(session.Key(base)) {
-		n++
-	}
-	return LogoutOutput{Removed: n}, nil
 }
 
 // alias returns the configured site name for a host, if any.

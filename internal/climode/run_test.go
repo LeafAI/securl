@@ -172,7 +172,7 @@ func TestAnUnknownCommandIsAUsageErrorThatListsTheRealOnes(t *testing.T) {
 func TestOnATerminalTheVaultIsOpenedWithThePassphraseTypedThereAndLockedAgain(t *testing.T) {
 	r := newRig(t, true)
 	r.secret = func() (string, error) { return testPass, nil }
-	if code := r.run(t, "site", "list"); code != 0 {
+	if code := r.run(t, "session", "list"); code != 0 {
 		t.Fatalf("exit %d: %s%s", code, r.out.String(), r.errOut.String())
 	}
 	if r.asked != 1 {
@@ -190,7 +190,7 @@ func TestAWrongPassphraseIsAskedForAgainThenGivenUp(t *testing.T) {
 	r := newRig(t, true)
 	tries := []string{"not it", "also not it", testPass}
 	r.secret = func() (string, error) { p := tries[0]; tries = tries[1:]; return p, nil }
-	if code := r.run(t, "site", "list"); code != 0 {
+	if code := r.run(t, "session", "list"); code != 0 {
 		t.Fatalf("the third try is right: exit %d: %s", code, r.errOut.String())
 	}
 	if r.asked != 3 {
@@ -199,7 +199,7 @@ func TestAWrongPassphraseIsAskedForAgainThenGivenUp(t *testing.T) {
 
 	r2 := newRig(t, true)
 	r2.secret = func() (string, error) { return "never right", nil }
-	if code := r2.run(t, "site", "list"); code != exitSetup {
+	if code := r2.run(t, "session", "list"); code != exitSetup {
 		t.Errorf("exit %d, want %d", code, exitSetup)
 	}
 	if r2.asked != 3 {
@@ -257,7 +257,7 @@ func TestWithNoTerminalThePassphraseIsNeverReadFromStandardInput(t *testing.T) {
 	r := newRig(t, true)
 	rec := r.withRobot()
 	r.in = testPass + "\n"
-	code := r.run(t, "site", "list")
+	code := r.run(t, "session", "list")
 	if r.vault.State() != vault.Locked {
 		t.Fatal("a passphrase on stdin opened the vault")
 	}
@@ -277,7 +277,7 @@ func TestThePassphraseIsNotTakenFromTheEnvironmentEither(t *testing.T) {
 	t.Setenv("SECURL_VAULT_PASSPHRASE", testPass)
 	r := newRig(t, true)
 	rec := r.withRobot()
-	r.run(t, "site", "list")
+	r.run(t, "session", "list")
 	if r.vault.State() != vault.Locked {
 		t.Fatal("an environment variable opened the vault")
 	}
@@ -290,7 +290,7 @@ func TestWithoutAVaultTheCommandSaysSoAndRunsNothing(t *testing.T) {
 	dir := t.TempDir()
 	cfg, _ := config.Load(dir + "/none.yaml")
 	r := &rig{cfg: cfg, vault: vault.NewWithCost(cfg.Vault.Dir, 1, 8, 1)}
-	if code := r.run(t, "site", "list"); code != exitSetup {
+	if code := r.run(t, "session", "list"); code != exitSetup {
 		t.Errorf("exit %d", code)
 	}
 	if !strings.Contains(r.errOut.String(), "securl vault init") {
@@ -300,7 +300,7 @@ func TestWithoutAVaultTheCommandSaysSoAndRunsNothing(t *testing.T) {
 
 func TestAnOpenVaultIsLeftAsItWasFoundByNothingButTheRunItself(t *testing.T) {
 	r := newRig(t, false)
-	if code := r.run(t, "site", "list"); code != 0 {
+	if code := r.run(t, "session", "list"); code != 0 {
 		t.Fatal(code)
 	}
 	// The vault object was handed in open. Locking it at the end is the right thing for a process that is about to exit.

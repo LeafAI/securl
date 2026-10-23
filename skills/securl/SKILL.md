@@ -24,6 +24,7 @@ You need an outbound `ssh` client (tunnels use it). Then pick the way that fits 
 
 ### 1a. No Go toolchain: the nightly build
 
+
 ```
 # macOS / Linux: <os> is darwin or linux, <arch> is arm64 or amd64
 curl -LO https://github.com/LeafAI/securl/releases/download/nightly/securl_<os>_<arch>.tar.gz
@@ -51,7 +52,6 @@ securl version                                    # nightly-<date>-<commit>
   a pre-release.
 - The nightly is the newest `master`, built each night when it has changed. It is not a tested release.
 
-### 1b. Go 1.21 or newer: go install
 **On a Mac, the installer package** is an alternative to the archive above (the same binary, universal, installed as `/usr/local/bin/securl`):
 
 ```
@@ -79,6 +79,7 @@ sudo installer -pkg securl_macos.pkg -target /       # the user types their pass
   process than the binary on disk (it was started before an update and never restarted). Restart it:
   `launchctl kickstart -k gui/$(id -u)/com.leafai.securl`, then `securl unlock`.
 
+### 1b. Go 1.21 or newer: go install
 
 ```
 go install github.com/LeafAI/securl@latest
@@ -96,11 +97,11 @@ the new commit yet: run it again in a minute, or use `GOPROXY=direct`.
   you just installed, an older copy comes first. `command -v securl` shows which one runs; remove the other (a `go install`
   copy is in `~/go/bin`, a download in `~/.local/bin`) or reorder `PATH`. A download says `nightly-<date>-<commit>`; a
   `go install` says `0.1.0`.
-
 - An older copy that comes first is the usual reason that a new version "does not change anything": a command that behaves like
   the old one (it ignores a new flag, or `securl unlock` waits and nobody is sent a link) is run by that copy. `command -v
   securl` and `securl version` show it. The installer package puts the binary in `/usr/local/bin`, which often comes after
   `~/go/bin` in `PATH`: move the old one aside (`mv ~/go/bin/securl ~/go/bin/securl.old`) rather than delete it.
+
 Register it with the MCP client (it speaks MCP over stdio):
 
 ```
@@ -129,11 +130,11 @@ install -m 0755 securl_*_<os>_<arch>/securl ~/.local/bin/securl
 securl version                                    # the new nightly-<date>-<commit>
 ```
 
-- **Go (1b):** run `go install github.com/LeafAI/securl@latest` again. It does not change `securl version` (`0.1.0`), so to
 - **Mac package:** run the package commands of section 1a again (`securl_macos.pkg`, the same checks, `sudo installer -pkg
   securl_macos.pkg -target /`). It replaces `/usr/local/bin/securl` and **restarts the running daemon** with the new binary, which
   starts **locked**: `securl unlock` sends the user a link. Sessions are in the vault, so logins survive. Then
   `securl daemon status` must say `running` with the new version; if it does not, see "Check that it worked" above.
+- **Go (1b):** run `go install github.com/LeafAI/securl@latest` again. It does not change `securl version` (`0.1.0`), so to
   know it moved, look at the build: in `go version -m $(command -v securl)` the `mod` line ends with the commit it was
   built from (`v0.0.0-<time>-<commit>`).
 
@@ -170,6 +171,9 @@ securl doctor                          # everything should be [ok]; the vault sh
   A site served under a path needs a root: `securl config set roots.elk.corp.example https://elk.corp.example/kibana`.
 - To limit what an agent may reach: `securl config set security.allowed_hosts "*.corp.example"`.
 - A site that is not built in: `securl config site custom` asks for the login form step by step.
+- **List the databases of every target.** Without a list of databases, any database name an agent gives is tried: the account
+  decides what it can reach. With a list, any other name is refused (`database_not_allowed`) before a connection is made.
+  `securl config db add` asks for them.
 - A database: `securl config db add` asks for the name, engine, host, environment (dev, test or staging), which databases
   and whether the agent may change data. It never asks for a database account: a person types that when a session is
   opened. `securl config db list` shows what exists; `securl config db remove <name>` forgets one. Do not hand-write the
@@ -185,7 +189,9 @@ typed. 1Password supports periods up to 10 minutes. Check with `securl config to
 
 The server starts **locked**. Follow this order and do not skip a step.
 
-1. `vault_status`. It needs no unlock and shows no secret. `state` is `not_initialized`, `locked` or `unlocked`.
+1. `vault_status`. It needs no unlock and shows no secret. `state` is `not_initialized`, `locked` or `unlocked`. While the vault
+   is locked only `vault_status`, `vault_unlock`, `site_list` and `db_targets` answer (`db_targets` lists the targets without
+   `has_session`: whether an account exists is the vault's to say); everything else answers `vault_locked`.
    - `not_initialized`: tell the user to run `securl vault init`. Nothing else works until then.
 2. `vault_unlock` when it is `locked`. The user gets a DingTalk link and types the passphrase on that page. (With no
    DingTalk robot and `security.link_via_agent`, the `pending` answer carries the link instead: see "Link in the answer".) The call waits
@@ -234,6 +240,24 @@ carries `link`, `key_code` and `instruction`. Nothing was sent to anybody, so yo
 - A `pending` answer with no `link` means nothing new: keep waiting. If the user lost the link, call `session_wait` again: it
   answers with the same link.
 
+### Closing sessions
+
+Answers you will see: `pending` (a person has not typed `DELETE` yet), `closed` with `removed` (done; `0` when there was nothing to
+close, and nobody was asked), `user_rejected` (they said no; nothing was closed), `bad_confirmation` (the wrong word three times; nothing
+was closed), `rate_limited` (they said no a moment ago; nobody is asked again for now) and `close_pending` (another confirmation is
+open for other sessions; wait for it).
+
+`session_close` (a `url`, or `all`) closes nothing by itself. The user gets a page that names every session that would go and asks
+them to type `DELETE`; until they do, the answer is `pending` with a `login_id`. Call it again with that id as `close_id` and the
+**same** `url` or `all`. A database account (`db://...`) is a password the user typed and cannot be recovered, so:
+
+- Close a session only when the user told you to, and say which. Never to "clean up", to retry a login (use `force_refresh`), or
+  because a command failed.
+- Prefer one URL to `all`. Never use `all` unless the user asked for every session to go.
+- `user_rejected` means they said no: stop, and do not ask again unless they tell you to. There is no argument that confirms for
+  them, and none will be honoured.
+- With `link_via_agent` the `pending` answer carries the link: show it as described above.
+
 ### Command line
 
 The same tools are commands, for the user's terminal or a script of theirs: `securl session open --url ...`,
@@ -262,6 +286,10 @@ is there for the next. `securl daemon status` says whether one runs. Commands us
 
 ### Archery SQL
 
+On the command line these are `securl archery instances|groups|query|run-sql|wait|workflow-status|cancel`. With no Archery
+session the command waits for the person's login (a link), then prints **its own answer**, not the login's; exit `0` means the
+answer is real. A command that answers `pending` and exits `4` is waiting for an approval: continue with `securl archery wait`.
+
 `archery_instances` and `archery_groups` list what the user may use. `archery_query` runs one read-only statement with no
 approval (`url`, `instance`, `database`, `sql`; `limit` caps the rows). To change data, `archery_run_sql` submits a
 workflow, notifies the approvers and waits: pass `url`, `instance`, `database`, `sql` and a short `title`
@@ -284,7 +312,7 @@ the title and statement are shown to them from what you wrote.
    change. Everything runs in one transaction; a change that touches more than `max_changed_rows` is rolled back
    (`too_many_rows`), so narrow the `WHERE`. DDL needs `allow_ddl` on the target (`ddl_disabled`).
 4. `session_expired` means the database stopped accepting the saved account: `session_open` again with `force_refresh`.
-   `session_close` with the same `db://` URL forgets the account.
+   `session_close` with the same `db://` URL forgets the account, after the user confirms (see below).
 
 Never use a database target for production: the owner cannot list one, and Archery (`archery_run_sql`) is where a person
 approves each change there. Do not look for another way to reach a host you were not given.
@@ -314,7 +342,9 @@ approves each change there. Do not look for another way to reach a host you were
 | `human_timeout` | nobody finished within 10 minutes | ask again; check the DingTalk group |
 | `user_rejected` | the person pressed Reject | do not retry unless asked |
 | `bad_credentials` | the site refused what was typed | retry carefully; accounts can lock |
-| `rate_limited` | people were asked too often, or wrong passphrases are being slowed | wait for the retry time |
+| `rate_limited` | people were asked too often, or wrong passphrases are being slowed, or a person just declined to close sessions | wait for the retry time |
+| `close_pending` | a confirmation to close other sessions is already open | wait for the person to answer it; do not ask again |
+| `bad_confirmation` | the confirmation word was wrong three times; nothing was closed | ask the user whether they want the sessions closed |
 | `host_not_allowed` | outside `security.allowed_hosts`, or one of this machine's own addresses | ask the user to change the setting; do not try other spellings |
 | `tunnel_unavailable` | no tunnel carried traffic | the user runs `securl doctor -tunnel` |
 | `notify_failed` | DingTalk refused the message, or there is no webhook | the user runs `securl doctor -send`, or sets `security.link_via_agent true` if there is no robot |

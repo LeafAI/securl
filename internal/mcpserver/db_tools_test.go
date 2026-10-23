@@ -443,24 +443,6 @@ func TestThePolicyShowsWhichTargetsExistWithoutHosts(t *testing.T) {
 	}
 }
 
-func TestSessionCloseForgetsADatabaseAccount(t *testing.T) {
-	e := withDB(t, "dev-pg", "dev-my")
-	out, isErr := e.call(t, toolSessionClose, map[string]any{"url": "db://dev-pg"})
-	if isErr || out["removed"] != float64(1) {
-		t.Fatalf("%v", out)
-	}
-	if out, isErr := e.call(t, toolDBQuery, map[string]any{"target": "dev-pg", "sql": "SELECT 1"}); !isErr || out["code"] != "no_session" {
-		t.Errorf("the account must be gone: %v", out)
-	}
-	if out, isErr := e.call(t, toolDBQuery, map[string]any{"target": "dev-my", "database": "appdb", "sql": "SELECT 1"}); isErr {
-		t.Errorf("the other target's account is untouched: %v", out)
-	}
-	all, _ := e.call(t, toolSessionClose, map[string]any{"all": true})
-	if all["removed"] != float64(1) {
-		t.Errorf("all removes the rest: %v", all)
-	}
-}
-
 func TestSessionCloseRefusesABadDatabaseURL(t *testing.T) {
 	e := withDB(t, "dev-pg")
 	for _, bad := range []string{"db://dev-pg/x", "db://", "db://user@dev-pg"} {
@@ -647,30 +629,6 @@ func TestLoggingInToOneTargetDoesNotReplaceTheOthersAccount(t *testing.T) {
 	}
 	if o[1].user != "test_writer" || o[1].pass != "TEST-PASSWORD-2222" {
 		t.Errorf("and only that target's: %+v", o)
-	}
-}
-
-func TestClosingOneTargetKeepsTheOthersOfTheSameEngine(t *testing.T) {
-	e := withDB(t)
-	putAccount(e, "dev-my", "dev_reader", "DEV-PASSWORD-1111")
-	putAccount(e, "dev-my-ddl", "test_writer", "TEST-PASSWORD-2222")
-	if out, _ := e.call(t, toolSessionClose, map[string]any{"url": "db://dev-my"}); out["removed"] != float64(1) {
-		t.Fatalf("%v", out)
-	}
-	if out, isErr := e.call(t, toolDBQuery, map[string]any{"target": "dev-my", "database": "appdb", "sql": "SELECT 1"}); !isErr || out["code"] != "no_session" {
-		t.Errorf("the closed target has no account: %v", out)
-	}
-	if out, isErr := e.call(t, toolDBQuery, map[string]any{"target": "dev-my-ddl", "sql": "SELECT 1"}); isErr {
-		t.Errorf("the other target of the same engine must be untouched: %v", out)
-	}
-	list, _ := e.call(t, toolDBTargets, map[string]any{})
-	has := map[string]bool{}
-	for _, x := range list["targets"].([]any) {
-		m := x.(map[string]any)
-		has[m["name"].(string)] = m["has_session"].(bool)
-	}
-	if has["dev-my"] || !has["dev-my-ddl"] {
-		t.Errorf("db_targets says %v", has)
 	}
 }
 

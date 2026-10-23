@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/LeafAI/securl/internal/vault"
 )
 
-// needsVault is the tools that work while the vault is locked: the two about the vault itself.
-var needsNoVault = map[string]bool{"vault_status": true, "vault_unlock": true}
+// needsNoVault is the tools that work while the vault is locked: the two about the vault itself, and the list of websites,
+// which holds nothing secret. The server decides this (it answers the others vault_locked); the list here only spares a person
+// from being asked to unlock for a command that does not need it.
+var needsNoVault = map[string]bool{"vault_status": true, "vault_unlock": true, "site_list": true}
 
 // call runs the tool: it opens the vault if the tool needs it, calls the tool, and while the answer says a person has to
 // do something it shows what and waits, so the command comes back with the final answer.
@@ -37,12 +40,14 @@ func (c *catalog_) call(ctx context.Context, env Env, cmd *command, input map[st
 		fmt.Fprintf(env.Err, "securl: %v\n", err)
 		return exitSetup
 	}
-	for !isErr && out["status"] == "pending" && !declinesToWait(input) {
-		next, ok := continuation(cmd.tool, out)
+	for !isErr && isPending(out) && !declinesToWait(input) {
+		wait := pendingPart(out)
+		next, ok := continuation(cmd.tool, wait)
 		if !ok {
 			return finish(env, out, false)
 		}
-		announce(env, out)
+		next.input = withScope(cmd.tool, input, next.input)
+		announce(env, wait)
 		if ctx.Err() != nil {
 			return finish(env, out, false)
 		}
@@ -50,8 +55,41 @@ func (c *catalog_) call(ctx context.Context, env Env, cmd *command, input map[st
 			fmt.Fprintf(env.Err, "securl: %v\n", err)
 			return exitSetup
 		}
+		if !isErr && next.tool == "session_wait" && out["status"] == "ok" && isLoginThenCall(cmd.tool) {
+			// What the command waited for was a login it needs on the way (the Archery tools): done, so the call it was made for
+			// is made again. Its own answer is what the person asked for; the login's is not.
+			if out, isErr, err = callTool(ctx, cs, cmd.tool, input); err != nil {
+				fmt.Fprintf(env.Err, "securl: %v\n", err)
+				return exitSetup
+			}
+		}
 	}
 	return finish(env, out, isErr)
+}
+
+// isLoginThenCall is the tools that log in on the way and answer pending with the login they wait for: once it is done they have
+// to be called again, because the answer to the wait is the login's and not their own. Opening a session is itself the login.
+func isLoginThenCall(tool string) bool {
+	return strings.HasPrefix(tool, "archery_") && tool != "archery_wait"
+}
+
+// isPending reports whether the answer says that a person has not answered yet. Most tools say it in `status`; the Archery tools
+// that list or query (instances, groups, query) carry the login they are waiting for in a `login` object beside what they would
+// have listed, and have no `status` of their own.
+func isPending(out map[string]any) bool {
+	if out["status"] == "pending" {
+		return true
+	}
+	login, _ := out["login"].(map[string]any)
+	return login != nil && login["status"] == "pending"
+}
+
+// pendingPart is the part of a pending answer that names what is waited for: the answer itself, or its `login`.
+func pendingPart(out map[string]any) map[string]any {
+	if login, _ := out["login"].(map[string]any); login != nil && out["status"] != "pending" {
+		return login
+	}
+	return out
 }
 
 // declinesToWait is a call that said it does not want to wait: `--wait=false` asks for the pending answer at once, so the
@@ -80,10 +118,34 @@ func continuation(tool string, out map[string]any) (nextCall, bool) {
 		if id != "" {
 			return nextCall{next, map[string]any{"unlock_id": id}}, true
 		}
+	case "session_close":
+		// The call that asked is the call that waits: the same scope, and the id it was given. The scope is not in the answer
+		// (the answer names no session), so the caller's own input is added by the loop.
+		if id != "" {
+			return nextCall{next, map[string]any{"close_id": id}}, true
+		}
 	case "archery_wait":
 		return nextCall{}, false // needs the workflow and the Archery URL the caller already has: the answer is returned as it is
 	}
 	return nextCall{}, false
+}
+
+// withScope adds to a continuation what the waiting call must repeat. Closing sessions names its scope again with the id: the
+// server refuses an id for another scope, so an answer to one question can never close the sessions of another.
+func withScope(tool string, input, next map[string]any) map[string]any {
+	if tool != "session_close" {
+		return next
+	}
+	out := map[string]any{}
+	for _, k := range []string{"url", "all"} {
+		if v, ok := input[k]; ok {
+			out[k] = v
+		}
+	}
+	for k, v := range next {
+		out[k] = v
+	}
+	return out
 }
 
 // announce tells the person at the terminal what is being waited for. The link of a handover is on stderr, never stdout:
@@ -109,7 +171,7 @@ func finish(env Env, out map[string]any, isErr bool) int {
 	switch {
 	case isErr:
 		return exitToolError
-	case out["status"] == "pending":
+	case isPending(out):
 		return exitPending
 	}
 	return 0
@@ -185,6 +247,16 @@ func remoteUnlock(ctx context.Context, env Env, cs *mcp.ClientSession) int {
 	return code
 }
 
+// vaultIsShut asks the server for the state of its vault. When it cannot tell, it answers true: saying that somebody is being
+// asked is the safe mistake, a silent wait is not.
+func vaultIsShut(ctx context.Context, cs *mcp.ClientSession) bool {
+	out, isErr, err := callTool(ctx, cs, "vault_status", map[string]any{})
+	if err != nil || isErr {
+		return true
+	}
+	return out["state"] != "unlocked"
+}
+
 // unlockAndReport is `securl unlock`: the same unlock, and its answer printed.
 func unlockAndReport(ctx context.Context, env Env, cs *mcp.ClientSession) int {
 	code, out := unlockOnce(ctx, env, cs)
@@ -198,9 +270,13 @@ func unlockAndReport(ctx context.Context, env Env, cs *mcp.ClientSession) int {
 
 // unlockOnce asks for the vault to be opened and waits for the person. It returns the exit code and the last answer.
 func unlockOnce(ctx context.Context, env Env, cs *mcp.ClientSession) (int, map[string]any) {
-	// What is being waited for is said before the wait, not after: while the person has the link, the terminal would
-	// otherwise show nothing at all, and the daemon's own log is in the daemon's terminal, not this one.
-	fmt.Fprintln(env.Err, "securl: asking the person to open the vault: they are sent a link and type the passphrase on its page (nothing is typed here)...")
+	// What is being waited for is said before the wait, not after: while the person has the link, the terminal would otherwise
+	// show nothing at all (vault_unlock blocks until they answer). It is said only when the vault is shut: an open one asks
+	// nobody, and a line that says it does sends the person looking for a message that was never sent. vault_status neither
+	// blocks nor asks anybody.
+	if vaultIsShut(ctx, cs) {
+		fmt.Fprintln(env.Err, "securl: asking the person to open the vault: they are sent a link and type the passphrase on its page (nothing is typed here)...")
+	}
 	out, isErr, err := callTool(ctx, cs, "vault_unlock", map[string]any{"reason": "securl command line"})
 	for err == nil && !isErr && out["status"] == "pending" {
 		announce(env, out)

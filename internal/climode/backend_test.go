@@ -58,7 +58,7 @@ func TestACommandUsesARunningDaemonAndLeavesItsVaultOpen(t *testing.T) {
 	sock, _ := r.startDaemon(t)
 	r.viaDaemon(sock)
 	r.secret = func() (string, error) { t.Error("the daemon's vault is open: nothing to ask"); return "", nil }
-	if code := r.run(t, "site", "list"); code != 0 {
+	if code := r.run(t, "session", "list"); code != 0 {
 		t.Fatalf("exit %d: %s%s", code, r.out.String(), r.errOut.String())
 	}
 	if r.vault.State() != vault.Unlocked {
@@ -81,7 +81,7 @@ func TestACommandThatFindsTheDaemonsVaultLockedAsksThePersonByLinkAndNeverSendsA
 		t.Error("a passphrase typed here would have to travel over the socket")
 		return "", nil
 	}
-	code := r.run(t, "site", "list")
+	code := r.run(t, "session", "list")
 	if code == 0 {
 		t.Fatalf("nobody typed on the page, so the command cannot succeed")
 	}
@@ -104,7 +104,7 @@ func TestOnceThePersonHasUnlockedTheDaemonTheNextCommandsJustRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		if code := r.run(t, "site", "list"); code != 0 {
+		if code := r.run(t, "session", "list"); code != 0 {
 			t.Fatalf("run %d: exit %d: %s%s", i, code, r.out.String(), r.errOut.String())
 		}
 	}
@@ -116,7 +116,7 @@ func TestOnceThePersonHasUnlockedTheDaemonTheNextCommandsJustRun(t *testing.T) {
 func TestWithNoDaemonACommandFallsBackToItsOwnProcessAndSaysSo(t *testing.T) {
 	r := newRig(t, false)
 	r.cfg.Daemon.Socket = filepath.Join("/tmp", "no-such-dir-for-securl-test", "d.sock")
-	if code := r.run(t, "site", "list"); code != 0 {
+	if code := r.run(t, "session", "list"); code != 0 {
 		t.Fatalf("exit %d: %s%s", code, r.out.String(), r.errOut.String())
 	}
 	if !strings.Contains(r.errOut.String(), "no daemon") {
@@ -133,7 +133,7 @@ func TestWithNoDaemonACommandFallsBackToItsOwnProcessAndSaysSo(t *testing.T) {
 func TestTheFallbackNoteIsOnlyWrittenOnce(t *testing.T) {
 	r := newRig(t, false)
 	r.cfg.Daemon.Socket = filepath.Join("/tmp", "no-such-dir-for-securl-test", "d.sock")
-	r.run(t, "site", "list")
+	r.run(t, "session", "list")
 	if n := strings.Count(r.errOut.String(), "no daemon"); n != 1 {
 		t.Errorf("the note appears %d times:\n%s", n, r.errOut.String())
 	}
@@ -144,7 +144,7 @@ func TestNoDaemonFlagNeverTouchesTheSocket(t *testing.T) {
 	sock, _ := r.startDaemon(t)
 	r.viaDaemon(sock)
 	r.noDaemon = true
-	if code := r.run(t, "site", "list"); code != 0 {
+	if code := r.run(t, "session", "list"); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if strings.Contains(r.errOut.String(), "no daemon") {
@@ -162,7 +162,7 @@ func TestADaemonOfAnotherVersionIsUsedButTheCommandSaysSo(t *testing.T) {
 	sock, _ := r.startDaemon(t)
 	mcpserver.Version = old
 	r.viaDaemon(sock)
-	if code := r.run(t, "site", "list"); code != 0 {
+	if code := r.run(t, "session", "list"); code != 0 {
 		t.Fatalf("exit %d: %s", code, r.errOut.String())
 	}
 	if !strings.Contains(r.errOut.String(), "0.0.1-daemon") {
@@ -177,7 +177,7 @@ func TestADaemonThatStopsInTheMiddleIsAnErrorNotAFallback(t *testing.T) {
 	sock, _, stop := r.startDaemonWithStop(t)
 	r.viaDaemon(sock)
 	r.afterConnect = stop
-	code := r.run(t, "site", "list")
+	code := r.run(t, "session", "list")
 	if code == 0 {
 		t.Fatalf("the daemon went away before the tool was called, yet the command succeeded: %s", r.out.String())
 	}
@@ -214,7 +214,7 @@ func TestFinishingACommandDoesNotLockTheDaemonOrAffectTheNext(t *testing.T) {
 	sock, _ := r.startDaemon(t)
 	r.viaDaemon(sock)
 	for i := 0; i < 3; i++ {
-		if code := r.run(t, "site", "list"); code != 0 {
+		if code := r.run(t, "session", "list"); code != 0 {
 			t.Fatalf("run %d: exit %d: %s", i, code, r.errOut.String())
 		}
 		if r.vault.State() != vault.Unlocked {
@@ -237,7 +237,7 @@ func TestSomethingThatIsNotADaemonOnTheSocketPathIsAnErrorNotAFallback(t *testin
 		t.Fatal(err)
 	}
 	r.viaDaemon(sock)
-	code := r.run(t, "site", "list")
+	code := r.run(t, "session", "list")
 	if code != exitSetup {
 		t.Errorf("exit %d, want %d\n%s", code, exitSetup, r.errOut.String())
 	}
@@ -278,7 +278,7 @@ func TestADaemonThatNeverAnswersTheHandshakeIsGivenUpOn(t *testing.T) {
 	r.viaDaemon(sock)
 	r.handshake = 500 * time.Millisecond
 	start := time.Now()
-	code := r.run(t, "site", "list")
+	code := r.run(t, "session", "list")
 	if code != exitSetup {
 		t.Errorf("exit %d, want %d\n%s", code, exitSetup, r.errOut.String())
 	}

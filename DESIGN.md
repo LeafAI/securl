@@ -279,6 +279,14 @@ calls trigger one prompt. Sessions are stored in the vault (`session/<base>` ent
 once the vault is open; the cache is dropped whenever the vault locks.
 `force_refresh` arg bypasses cache.
 
+**Closing is the person's decision.** A saved session is what a person typed once (for a database, an account and password that
+exist nowhere else), and closing it is irreversible; with a daemon, any process of the user can call the tool. So
+`session_close` asks first, on the same page and by the same route as an unlock: the server freezes the list of sessions in
+scope, sends a link whose page names them and asks for the word `DELETE`, and closes exactly that list when the word is typed
+(three tries; Reject closes nothing and starts a cool-down). A call that has nothing to close asks nobody. The sessions that the
+cache drops by itself (expiry, a refusal by the site) and a `force_refresh` replacement are not closings by the agent and stay as
+they were; the first is audited as `session_dropped`.
+
 ## 5. MCP tools
 
 | Tool | Input | Output |
@@ -286,7 +294,7 @@ once the vault is open; the cache is dropped whenever the vault locks.
 | `session_open` | `url`, `site?`, `force_refresh?`, `timeout_s?` | `{site, auth, cached, expires_at}`: no credential |
 | `request` | `url`, `method`, `path`, `query?`, `headers?`, body | `{status, headers, body, redactions, ...}`: credentials put in and taken out |
 | `session_list` | – | cached hosts + expiry (no secrets) |
-| `session_close` | `url` | drops cache |
+| `session_close` | `url` or `all`, `close_id?` | drops the named sessions after a person typed `DELETE` on a page |
 | `archery_query` | `url`, `instance`, `db`, `sql`, `limit` | rows (read-only query endpoint, no approval) |
 | `archery_run_sql` | `url`, `instance`, `db`, `sql`, `remark`, `wait_timeout_s?` | execution result (sync) |
 | `archery_workflow_status` / `archery_wait` | `workflow_id` | status / continue waiting & execute |

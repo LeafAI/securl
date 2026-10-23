@@ -81,6 +81,8 @@ type core struct {
 	tracker *archery.Tracker
 	keys    *keyring.MemoryPool
 
+	closer *closer // asks a person before saved sessions are closed
+
 	linkTOTP, sealTOTP bool // which TOTP factors are on (reported by the policy resource; never their secrets)
 }
 
@@ -174,6 +176,7 @@ func (s *Server) Close() {
 	s.mu.Unlock()
 	if c != nil {
 		c.mgr.Close()
+		c.closer.mgr.Close()
 	}
 }
 
@@ -186,6 +189,7 @@ func (s *Server) Drain(limit time.Duration) {
 	s.mu.Unlock()
 	if c != nil {
 		c.mgr.Drain(limit)
+		c.closer.mgr.Drain(limit)
 	}
 }
 
@@ -233,7 +237,7 @@ func (s *Server) register(m *mcp.Server) error {
 			return addTool(m, s.observe, spec[SessionsOutput]{toolSessionList, "List sessions", "List the sites that have a session (never the credentials).", ro}, s.sessions)
 		},
 		func() error {
-			return addTool(m, s.observe, spec[LogoutOutput]{toolSessionClose, "Close a session", "Forget the session for a URL (or all sessions) and cancel a session that is still being opened for it.", nil}, s.logout)
+			return addTool(m, s.observe, spec[LogoutOutput]{toolSessionClose, "Close a session", "Ask the user to close the saved session for a URL (or all of them). Nothing is closed until the person has typed " + closeWord + " on a page opened from a DingTalk link that names what goes: a database account is a password they typed and cannot be recovered. Returns pending until then; call again with the close_id (and the same url or all). A rejection closes nothing. Does nothing and asks nobody when there is no saved session to close. Cancelling a login that is still being opened needs no confirmation.", &mcp.ToolAnnotations{DestructiveHint: &destructive}}, s.logout)
 		},
 		func() error {
 			return addTool(m, s.observe, spec[InstancesOutput]{"archery_instances", "List Archery instances", "List Archery instances (and optionally an instance's databases) the user can access.", ro}, s.archeryInstances)

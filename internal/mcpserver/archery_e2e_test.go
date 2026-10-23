@@ -2,8 +2,10 @@ package mcpserver_test
 
 import (
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -175,4 +177,71 @@ func testArcheryCancelAndRejectedReporting(t *testing.T, legacy bool) {
 	if out, isErr = e.call(t, "archery_workflow_status", args(map[string]any{"workflow_id": 999})); !isErr || out["code"] != "workflow_not_found" {
 		t.Errorf("unknown workflow: %v", out)
 	}
+}
+
+// A call that finds a session asks the site once whether it still works, not twice. Asking again right after the login step
+// had a cost that was not the slowness: a single hiccup of the site (a 502, a timeout) in that second question was reported as
+// "session vanished right after login", although the session was fine and nobody had logged out.
+func TestAnArcheryCallChecksTheSessionOnce(t *testing.T) {
+	forGenerations(t, func(t *testing.T, legacy bool) {
+		f := &archerytest.Fake{Legacy: legacy}
+		var mu sync.Mutex
+		probes := 0
+		h := f.Handler()
+		arch := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/group/user_all_instances/" || r.URL.Path == "/api/v1/sqlquery/instances/" {
+				mu.Lock()
+				probes++
+				mu.Unlock()
+			}
+			h.ServeHTTP(w, r)
+		}))
+		defer arch.Close()
+		e := setupWithClient(t, arch.Client(), func(c *config.Config) { c.Archery.DefaultGroup = "dba" })
+		loginArchery(t, e, arch)
+		mu.Lock()
+		probes = 0
+		mu.Unlock()
+		if out, isErr := e.call(t, "archery_groups", map[string]any{"url": arch.URL}); isErr {
+			t.Fatalf("%v", out)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if probes != 1 {
+			t.Errorf("one call asked the site %d times whether the session works, want 1", probes)
+		}
+	})
+}
+
+// When the site cannot be reached for that one question, the answer says so and the session is kept: it is not "vanished".
+func TestAnArcheryCallThatCannotCheckTheSessionSaysTheSiteIsUnreachableAndKeepsIt(t *testing.T) {
+	forGenerations(t, func(t *testing.T, legacy bool) {
+		f := &archerytest.Fake{Legacy: legacy}
+		var mu sync.Mutex
+		down := false
+		h := f.Handler()
+		arch := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			d := down
+			mu.Unlock()
+			if d && (r.URL.Path == "/group/user_all_instances/" || r.URL.Path == "/api/v1/sqlquery/instances/") {
+				http.Error(w, "bad gateway", http.StatusBadGateway)
+				return
+			}
+			h.ServeHTTP(w, r)
+		}))
+		defer arch.Close()
+		e := setupWithClient(t, arch.Client(), nil)
+		loginArchery(t, e, arch)
+		mu.Lock()
+		down = true
+		mu.Unlock()
+		out, isErr := e.call(t, "archery_groups", map[string]any{"url": arch.URL})
+		if !isErr || out["code"] != "site_unreachable" {
+			t.Errorf("a 502 on the check is the site being unreachable, not a vanished session: %v %v", isErr, out)
+		}
+		if s, _ := e.call(t, "session_list", nil); !strings.Contains(fmt.Sprint(s), arch.URL) {
+			t.Errorf("the session must be kept: %v", s)
+		}
+	})
 }
