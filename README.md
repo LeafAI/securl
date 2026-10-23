@@ -37,6 +37,47 @@ install -m 0755 securl_*_<os>_<arch>/securl ~/.local/bin/securl
 securl version                                          # nightly-<date>-<commit>
 ```
 
+**macOS: the installer package.** On a Mac, `securl_macos.pkg` (a universal binary, Apple silicon and Intel) installs
+`/usr/local/bin/securl`, which is on every Mac's default `PATH`. Check it the same way, then open it:
+
+```
+curl -LO https://github.com/LeafAI/securl/releases/download/nightly/securl_macos.pkg
+curl -LO https://github.com/LeafAI/securl/releases/download/nightly/SHA256SUMS
+curl -LO https://github.com/LeafAI/securl/releases/download/nightly/SHA256SUMS.sig
+curl -LO https://raw.githubusercontent.com/LeafAI/securl/master/keys/allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I securl-release -n securl-release -s SHA256SUMS.sig < SHA256SUMS   # must print "Good"
+shasum -a 256 --ignore-missing -c SHA256SUMS                                                                 # must print OK
+open securl_macos.pkg            # or: sudo installer -pkg securl_macos.pkg -target /
+securl version
+```
+
+- **The package is not signed by Apple**, which needs a Developer ID certificate that this project does not have. macOS will stop
+  the first double-click ("cannot be opened because it is from an unidentified developer"): right-click the file and choose Open,
+  or allow it in System Settings, Privacy & Security. The signature of `SHA256SUMS` above is what shows who published the file, and
+  it is checked by you, not by macOS. `sudo installer -pkg` is not stopped by Gatekeeper, and is the same installation.
+- **When it finishes, `securl daemon` is running** for you, and is started for every user of the Mac each time they log in. The
+  package's last step makes one login agent for the machine, `/Library/LaunchAgents/com.leafai.securl.plist`, and loads it into the
+  session of the person at the console. launchd runs it for each user as that user, so every user gets their own daemon, with their
+  own configuration, vault and socket; nobody's daemon runs as root and none serves another user. If nobody is logged in, the agent is
+  put in place and starts at each user's next login. If that step fails, the file is still installed, the package says why, and tells
+  you to run `sudo securl daemon install` yourself.
+- **Check that it worked:** `securl daemon status` must say `running` and `login agent: installed and loaded`. If it says
+  `installed, not loaded for you yet` (or `not running`), the installer could not start the daemon; the file is still installed.
+  The reason is in the installer's own log, `grep postinstall /var/log/install.log | tail`, and `sudo securl daemon install` starts
+  it. **Upgrading** over a running daemon restarts it with the new binary, locked again (`securl unlock`); a command that prints
+  "the daemon is version X and this command is Y" means a daemon that was not restarted: `launchctl kickstart -k
+  gui/$(id -u)/com.leafai.securl`.
+- **Another copy of `securl` earlier on `PATH`** (a `go install` copy in `~/go/bin` comes before `/usr/local/bin` on many
+  machines) is run instead of the package's: `command -v securl` shows it. Move it aside, do not rely on `PATH` order.
+- **What is running is locked.** The daemon starts with its vault shut: it holds no secret, and nothing is typed into the Installer.
+  The first time, run `securl vault init` (you choose the passphrase) and `securl config init`; then `securl unlock` sends you a link
+  and you type the passphrase on its page. Once you unlock it, every process of your account can use your sessions through the
+  daemon (never a credential) until it locks again. `vault.idle_lock` sets how long that is (`securl config set vault.idle_lock 30m`);
+  without it the vault stays open until the daemon stops. The daemon's own log is `~/Library/Logs/securl-daemon.log`.
+- To remove securl: `sudo securl daemon uninstall` (no user gets a daemon at login any more, and yours is stopped), then
+  `sudo rm /usr/local/bin/securl` and `sudo pkgutil --forget com.leafai.securl`. Its configuration, vault and audit log are in
+  `~/Library/Application Support/securl/` and are yours to keep or delete. A daemon that another user is running stops when they log out.
+
 **What the signature proves.** `SHA256SUMS` is signed with the release key, whose public half is `keys/securl-release.pub` in this
 repository (ed25519, fingerprint `SHA256:QSdbV2Da6NA2sJZ7wFj08onoUQ1qJvQO8w+AZAYweQI`). The first
 `ssh-keygen` command shows that `SHA256SUMS` is the file the publishers signed, and the `shasum` command then shows that your

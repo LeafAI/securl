@@ -52,6 +52,33 @@ securl version                                    # nightly-<date>-<commit>
 - The nightly is the newest `master`, built each night when it has changed. It is not a tested release.
 
 ### 1b. Go 1.21 or newer: go install
+**On a Mac, the installer package** is an alternative to the archive above (the same binary, universal, installed as `/usr/local/bin/securl`):
+
+```
+curl -LO https://github.com/LeafAI/securl/releases/download/nightly/securl_macos.pkg
+curl -LO https://github.com/LeafAI/securl/releases/download/nightly/SHA256SUMS
+curl -LO https://github.com/LeafAI/securl/releases/download/nightly/SHA256SUMS.sig
+curl -LO https://raw.githubusercontent.com/LeafAI/securl/master/keys/allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I securl-release -n securl-release -s SHA256SUMS.sig < SHA256SUMS   # it must print "Good"
+shasum -a 256 --ignore-missing -c SHA256SUMS                                                                 # it must print OK
+sudo installer -pkg securl_macos.pkg -target /       # the user types their password; or they open the file
+```
+
+- Do the two checks first; do not install a package that fails either. The package is not signed by Apple, so opening it by
+  double-click is stopped by macOS: `sudo installer -pkg` is not, and is the same installation. Do not run `sudo` yourself with a
+  password you were given: the user runs it.
+- It installs one file and **starts the daemon** for the user who installed it, locked: `securl daemon status` says so. It is one login
+  agent for the machine (`/Library/LaunchAgents`), run by launchd as each user at login (`sudo securl daemon uninstall` removes it). Do not unlock it yourself: `securl unlock` sends the user a link, and the
+  passphrase is theirs to type. See "Daemon" in section 4.
+- **Check that it worked**: `securl daemon status` must say `running` and `login agent: installed and loaded`. If it says `not
+  running`, or the agent is `installed, not loaded for you yet`, the installer could not start the daemon (nobody was at the
+  console, or launchd refused). The package is still installed; the reason is in the installer's own log:
+  `grep postinstall /var/log/install.log | tail`. Start it by hand with `sudo securl daemon install` (it loads the agent for the
+  user who runs it), or log out and in. A daemon is never started by anything but the user's own session.
+- If a command prints `the daemon is version X and this command is Y; they may answer differently`, the daemon is an older
+  process than the binary on disk (it was started before an update and never restarted). Restart it:
+  `launchctl kickstart -k gui/$(id -u)/com.leafai.securl`, then `securl unlock`.
+
 
 ```
 go install github.com/LeafAI/securl@latest
@@ -70,6 +97,10 @@ the new commit yet: run it again in a minute, or use `GOPROXY=direct`.
   copy is in `~/go/bin`, a download in `~/.local/bin`) or reorder `PATH`. A download says `nightly-<date>-<commit>`; a
   `go install` says `0.1.0`.
 
+- An older copy that comes first is the usual reason that a new version "does not change anything": a command that behaves like
+  the old one (it ignores a new flag, or `securl unlock` waits and nobody is sent a link) is run by that copy. `command -v
+  securl` and `securl version` show it. The installer package puts the binary in `/usr/local/bin`, which often comes after
+  `~/go/bin` in `PATH`: move the old one aside (`mv ~/go/bin/securl ~/go/bin/securl.old`) rather than delete it.
 Register it with the MCP client (it speaks MCP over stdio):
 
 ```
@@ -99,10 +130,15 @@ securl version                                    # the new nightly-<date>-<comm
 ```
 
 - **Go (1b):** run `go install github.com/LeafAI/securl@latest` again. It does not change `securl version` (`0.1.0`), so to
+- **Mac package:** run the package commands of section 1a again (`securl_macos.pkg`, the same checks, `sudo installer -pkg
+  securl_macos.pkg -target /`). It replaces `/usr/local/bin/securl` and **restarts the running daemon** with the new binary, which
+  starts **locked**: `securl unlock` sends the user a link. Sessions are in the vault, so logins survive. Then
+  `securl daemon status` must say `running` with the new version; if it does not, see "Check that it worked" above.
   know it moved, look at the build: in `go version -m $(command -v securl)` the `mod` line ends with the commit it was
   built from (`v0.0.0-<time>-<commit>`).
 
-Then restart the MCP server process (the client or gateway starts it again). **A restart locks the vault**: the user types
+Then restart the MCP server process (the client or gateway starts it again; it is a separate process from the daemon, and
+keeps running the old binary until it is restarted). **A restart locks the vault**: the user types
 the passphrase once more (section 4). Sessions are kept in the vault, so logins survive the restart.
 
 A new build can change the login page (it is published separately, from `master`). If logins start failing right after an
@@ -219,8 +255,10 @@ is there for the next. `securl daemon status` says whether one runs. Commands us
 - A locked daemon is opened by link (DingTalk, or `security.link_via_agent`): the user types the passphrase on the page.
   `securl unlock` asks for that and waits; run it when a command answered `vault_locked` and the user is at their desk.
   **Never pass a passphrase to a command to open a daemon: there is no way to, by design.**
-- Do not start a daemon on your own. It keeps the user's vault open for every process of their account, you included. If one is
-  not running and the user wants one, tell them to run `securl daemon` and to set `vault.idle_lock`.
+- Do not start a daemon on your own, and do not run `securl daemon install`: on a Mac it writes `/Library/LaunchAgents` and needs
+  root, which is the user's to give. A daemon keeps the user's vault open for every process of their account, you included. If the
+  user wants one and the package was not used, tell them to run `securl daemon`, or `sudo securl daemon install` to have launchd run
+  one for every user at login, and to set `vault.idle_lock` first.
 
 ### Archery SQL
 

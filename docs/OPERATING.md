@@ -136,6 +136,50 @@ securl --no-daemon site list        # run one command alone, even with a daemon 
   ends with an error and is not run again by itself, since it may already have done what it was asked.
 - Not available on Windows, nor on systems that cannot report who is on the other end of a socket: commands run alone there.
 
+### macOS installer package and the login agent
+
+`securl_macos.pkg` (see the README for the commands, and for why macOS stops its first opening) installs the one file
+`/usr/local/bin/securl`, universal, and starts the daemon for the person who ran the Installer.
+
+**The agent is the machine's.** The package's last step runs as root, which is what writing `/Library/LaunchAgents` needs. It runs
+`securl daemon install -uid <uid>`, which writes one plist there, `com.leafai.securl.plist`, and loads it into the login session of that
+user now. launchd then runs it for **every user at graphical login, as that user**: each user has their own daemon, with their own
+configuration, vault and socket, and a user's daemon checks that whoever calls it is that user. The uid is the owner of `/dev/console`;
+root, the login window, a service account (`_xxx`) and a name that is not an account are refused, and root's own session is never used,
+because a daemon there would run as root and serve root's files. With nobody at the console the agent is put in place without `-uid`
+and starts at each user's next login. If it fails the package is still installed (the script exits 0), prints the reason that
+`securl daemon install` gave, and says to run the same command by hand.
+
+```
+sudo securl daemon install [-uid N]   # writes /Library/LaunchAgents/com.leafai.securl.plist; with -uid also loads it into that user's session now
+securl daemon status                  # running or not, the vault, and whether the login agent is installed and loaded
+sudo securl daemon uninstall          # removes the plist and stops the daemon of the user it is given with -uid
+```
+
+- It needs root, because the agent is for every user. As an ordinary user, `install` says so and what to run; nothing is written.
+- The plist names **no user and no path under anyone's home**: it is one file for everybody, and launchd expands neither `~` nor
+  `$HOME` in it. It runs `/usr/local/bin/securl daemon -log default` by an absolute path, with no shell and nothing secret in it or in
+  its environment. `-log default` makes the daemon open `~/Library/Logs/securl-daemon.log` of the user it runs as (mode 0600), and its
+  configuration is found from that user's own `HOME`. launchd restarts it only if it **fails** (not after a clean stop), and not
+  more often than every 30 seconds.
+- Every Mac this is installed on gets a daemon for every user who logs in. Each starts **locked**: `securl unlock` opens it. Without
+  `vault.idle_lock` an unlocked daemon stays open until it stops, which is why it is the setting to look at first.
+- The package does not ask for the passphrase and no script of it ever sees one: the daemon is running and empty, and the vault is
+  made and opened by you, by `securl vault init` and by a link.
+- Upgrading: install the new package. It replaces the file **and restarts the running daemon** with it: the installer takes the
+  loaded agent out and loads it again, and waits while launchd is still tidying up the old process (`launchctl bootout` returns before it
+  has exited, and a `bootstrap` in that moment fails with "Input/output error"; it is tried again for about ten seconds). The new daemon
+  starts **locked**. A daemon that was started by something else, or that the installer could not restart, keeps running the old code
+  until `launchctl kickstart -k gui/$(id -u)/com.leafai.securl` or a login; a command then prints "the daemon is version X and this
+  command is Y".
+- When the daemon is not running after the installer (`securl daemon status` says `not running`, or `installed, not loaded for you
+  yet`): the installer still installed the file. What it did and why it could not start the daemon is in its own log,
+  `grep postinstall /var/log/install.log | tail`; `sudo securl daemon install` starts it, or a login does. The daemon's log is
+  `~/Library/Logs/securl-daemon.log`.
+- An older `securl` earlier on `PATH` (a `go install` copy in `~/go/bin`) is the usual reason that a command behaves like the old
+  version after an install: `command -v securl`.
+- Not signed, not notarised: see the README.
+
 ## 5. Configure each site
 
 Use `securl doctor -site <url>` for every site before the first login. It needs no credentials, applies your

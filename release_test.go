@@ -104,8 +104,8 @@ func TestOnlyAMasterBuildThatTheFirstJobApprovedIsPublished(t *testing.T) {
 		got = append(got, n.(string))
 	}
 	sort.Strings(got)
-	if strings.Join(got, ",") != "build,sign" {
-		t.Errorf("publish must wait for build and for the signature, needs: %v", pub.Needs)
+	if strings.Join(got, ",") != "build,macos,sign" {
+		t.Errorf("publish must wait for build, for the macOS package and for the signature, needs: %v", pub.Needs)
 	}
 	// What decides: master, and a scheduled or manual run. A pull request must never reach `publish=true`.
 	for _, want := range []string{`"$REF" = "refs/heads/master"`, `"$EVENT" = "schedule"`, `"$EVENT" = "workflow_dispatch"`} {
@@ -193,8 +193,9 @@ func TestNightlyTestsBeforeItBuildsAndPublishesWhatItBuilt(t *testing.T) {
 			order = append(order, "upload")
 		}
 	}
-	if strings.Join(order, ",") != "test,build,upload" {
-		t.Errorf("build job order = %v, want test, build, upload", order)
+	// two uploads: the archives (without the sums), and the sums, which the macos job adds the package to
+	if strings.Join(order, ",") != "test,build,upload,upload" {
+		t.Errorf("build job order = %v, want test, build, upload, upload", order)
 	}
 	var download, publish, checkout bool
 	for _, s := range w.Jobs["publish"].Steps {
