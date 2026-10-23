@@ -115,10 +115,37 @@ func Dial(ctx context.Context, path string) (net.Conn, error) {
 	if err == nil {
 		return c, nil
 	}
-	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT) {
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOENT) {
+		return nil, fmt.Errorf("%w (%s)", errNotRunning, path)
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		// "Connection refused" is what a socket that nobody listens on says, and also what Linux says for a regular file, a
+		// directory and a link to one of them (macOS says "not a socket" for those). So the errno does not tell a daemon that is
+		// not running from something that is in the way: what is on the path does.
+		if what := inTheWay(path); what != "" {
+			return nil, fmt.Errorf("%s is %s, not a socket: something else is in the place of the daemon's socket", path, what)
+		}
 		return nil, fmt.Errorf("%w (%s)", errNotRunning, path)
 	}
 	return nil, err
+}
+
+// inTheWay says what is at path when it is not a socket (and not a link to one), or "" when it is one. A path that cannot be
+// examined is not said to be in the way: the dial's own error decides.
+func inTheWay(path string) string {
+	st, err := os.Stat(path) // follows a link: a link to a socket is the daemon's socket, a link to a file is not
+	if err != nil {
+		return ""
+	}
+	switch {
+	case st.Mode()&os.ModeSocket != 0:
+		return ""
+	case st.IsDir():
+		return "a directory"
+	case st.Mode().IsRegular():
+		return "a regular file"
+	}
+	return "not a socket"
 }
 
 // setUmask sets the process umask and returns the old one.
