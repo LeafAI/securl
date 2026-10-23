@@ -256,3 +256,52 @@ func TestPeerOfAnotherUserIsRefused(t *testing.T) {
 		t.Errorf("the same uid was refused: %v", err)
 	}
 }
+
+// What is on the path decides the answer, not the errno that a platform happens to give for it. Dialing a regular file is
+// "socket operation on non-socket" on macOS and "connection refused" on Linux, and "connection refused" is also what a socket that
+// nobody listens on says: reading only the errno made a file that was in the way look like a daemon that was not running, on one
+// system and not on the other, and the command then went on by itself instead of telling the person that something is in the way.
+func TestAFileInThePlaceOfTheSocketIsNotAbsenceOfADaemonOnAnySystem(t *testing.T) {
+	path := filepath.Join(shortDir(t), "d.sock")
+	if err := os.WriteFile(path, []byte("not a socket"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Dial(context.Background(), path)
+	if err == nil {
+		t.Fatal("a file is not a daemon")
+	}
+	if IsNotRunning(err) {
+		t.Errorf("a file that is in the way must not be reported as a daemon that is not running: %v", err)
+	}
+	// each system has its own words for it (macOS: "socket operation on non-socket"; the error made for Linux: "not a socket")
+	if m := err.Error(); !strings.Contains(m, "non-socket") && !strings.Contains(m, "not a socket") {
+		t.Errorf("the error says that what is there is not a socket: %v", err)
+	}
+}
+
+func TestADirectoryInThePlaceOfTheSocketIsNotAbsenceOfADaemonEither(t *testing.T) {
+	path := filepath.Join(shortDir(t), "d.sock")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Dial(context.Background(), path)
+	if err == nil || IsNotRunning(err) {
+		t.Errorf("a directory is in the way, not an absent daemon: %v", err)
+	}
+}
+
+// A symlink to a socket is followed by the dial and is not what the daemon makes; a symlink to a file is in the way.
+func TestASymlinkToAFileInThePlaceOfTheSocketIsInTheWay(t *testing.T) {
+	dir := shortDir(t)
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "d.sock")
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Dial(context.Background(), path); err == nil || IsNotRunning(err) {
+		t.Errorf("%v", err)
+	}
+}
