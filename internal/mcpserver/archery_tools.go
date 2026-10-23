@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/LeafAI/securl/internal/session"
 	"github.com/LeafAI/securl/internal/site"
 	"github.com/LeafAI/securl/internal/site/archery"
 )
@@ -33,7 +34,10 @@ func (s *Server) archeryClient(ctx context.Context, req *mcp.CallToolRequest, u 
 	}
 	base, _ := baseOf(u.URL)
 	base = s.root(base)
-	e, ok := k.cache.Get(ctx, base, s.hc)
+	// ensureLogin has just checked the session with the site (or logged in, which is a check of its own). Asking again would
+	// be a second round trip for nothing, and one hiccup of the site between the two was reported as a vanished session although
+	// nobody had logged out. So the entry is taken as it is; a session that really is gone is not in the cache.
+	e, ok := k.cache.Peek(session.Key(base))
 	if !ok {
 		return nil, nil, errf("internal", true, "session vanished right after login; retry")
 	}

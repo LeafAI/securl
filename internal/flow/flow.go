@@ -70,6 +70,9 @@ type Purpose struct {
 	Warning string // a closing line telling the person when to ignore the message
 }
 
+// maxDetail bounds the detail of a message, which names what a person is asked to agree to.
+const maxDetail = 900
+
 type Config struct {
 	// Purpose, when set, replaces the login wording of every message of this manager.
 	Purpose  *Purpose
@@ -164,6 +167,7 @@ type Flow struct {
 	Site   string
 	Base   *url.URL
 	Reason string
+	Detail string // what the person agrees to, in securl's own words (see StartDetailed); empty for an ordinary login
 
 	m      *Manager
 	cancel context.CancelFunc
@@ -203,6 +207,12 @@ func (f *Flow) shutdown() {
 
 // Start launches (or joins) the login flow for a site. onDone runs once with the result.
 func (m *Manager) Start(d site.Driver, base *url.URL, reason string, hc *http.Client, onDone func(*Flow, Result)) *Flow {
+	return m.StartDetailed(d, base, reason, "", hc, onDone)
+}
+
+// StartDetailed is Start for a flow whose message must say, in securl's own words, what the person is being asked to agree
+// to. detail is shown in the message under the agent's reason, which is the agent's and cannot be trusted to say it.
+func (m *Manager) StartDetailed(d site.Driver, base *url.URL, reason, detail string, hc *http.Client, onDone func(*Flow, Result)) *Flow {
 	key := site.Key(base)
 	m.mu.Lock()
 	if f := m.byBase[key]; f != nil && !f.ended() {
@@ -221,7 +231,7 @@ func (m *Manager) Start(d site.Driver, base *url.URL, reason string, hc *http.Cl
 	var idb [8]byte
 	rand.Read(idb[:])
 	ctx, cancel := context.WithCancel(context.Background())
-	f := &Flow{ID: "lg_" + hex.EncodeToString(idb[:]), Site: d.Name(), Base: base, Reason: reason,
+	f := &Flow{ID: "lg_" + hex.EncodeToString(idb[:]), Site: d.Name(), Base: base, Reason: reason, Detail: detail,
 		m: m, cancel: cancel, done: make(chan struct{}), closed: make(chan struct{}), snap: Snapshot{Phase: "starting"}}
 	m.flows[f.ID] = f
 	m.byBase[key] = f
@@ -725,6 +735,9 @@ func message(f *Flow, mode string, n int, link, fpr string, expires time.Time, n
 	reason := notify.Escape(f.Reason, 200)
 	if reason == "" {
 		reason = "(not given)"
+	}
+	if f.Detail != "" {
+		reason += "\n- **What securl will do** (securl's own words, not the agent's): " + notify.Escape(f.Detail, maxDetail)
 	}
 	short := keyCode(fpr)
 	return note + fmt.Sprintf("### %s\n\n"+

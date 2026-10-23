@@ -60,15 +60,15 @@ expect "Vault passphrase"
 send "$env(PASS)\r"
 expect eof
 catch wait r
-exit [lindex $r 3]`, "site", "list")
+exit [lindex $r 3]`, "session", "list")
 	if err != nil {
-		t.Fatalf("site list on a terminal: %v\n%s", err, out)
+		t.Fatalf("session list on a terminal: %v\n%s", err, out)
 	}
 	if strings.Contains(strings.Replace(out, "send \""+pass, "", 1), pass) && strings.Count(out, pass) > 0 {
 		// expect itself does not print what it sends with log_user on, so any occurrence is an echo by the program or the tty
 		t.Errorf("the passphrase appears on the terminal:\n%s", out)
 	}
-	if !strings.Contains(out, `"sites"`) {
+	if !strings.Contains(out, `"sessions"`) {
 		t.Errorf("the command did not run after the passphrase:\n%s", out)
 	}
 }
@@ -88,7 +88,7 @@ func TestWithoutATerminalTheCommandDoesNotAskForAPassphraseAtAll(t *testing.T) {
 	if err := makeVault(filepath.Join(home, "vault"), pass); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(binary(t), "site", "list", "-config", cfg)
+	cmd := exec.Command(binary(t), "session", "list", "-config", cfg)
 	cmd.Env = append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, "cfg"), "XDG_RUNTIME_DIR="+shortRuntimeDir(t))
 	cmd.Stdin = strings.NewReader(pass + "\n")
 	out, err := cmd.CombinedOutput()
@@ -98,7 +98,7 @@ func TestWithoutATerminalTheCommandDoesNotAskForAPassphraseAtAll(t *testing.T) {
 	if strings.Contains(string(out), "Vault passphrase:") {
 		t.Errorf("it asked for the passphrase with no terminal:\n%s", out)
 	}
-	if strings.Contains(string(out), `"sites"`) {
+	if strings.Contains(string(out), `"sessions"`) {
 		t.Errorf("a passphrase piped to stdin opened the vault:\n%s", out)
 	}
 }
@@ -135,7 +135,7 @@ expect {
 	}
 	cmd := exec.Command(expect, file)
 	cmd.Env = append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, "cfg"), "XDG_RUNTIME_DIR="+shortRuntimeDir(t), "LOGFILE="+logFile,
-		"argv="+binary(t)+" site list -config "+cfg)
+		"argv="+binary(t)+" session list -config "+cfg)
 	out, _ := cmd.CombinedOutput()
 	if strings.Contains(string(out), "PROMPT-ON-TERMINAL") {
 		t.Errorf("it waited on the terminal for a passphrase with standard error redirected:\n%s", out)

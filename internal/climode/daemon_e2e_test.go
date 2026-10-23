@@ -35,7 +35,7 @@ func TestOneDaemonServesALoginAndTheCommandsThatFollowIt(t *testing.T) {
 	done := make(chan int, 1)
 	var first rig
 	first.cfg, first.vault, first.server = r.cfg, r.vault, r.server
-	go func() { done <- first.run(t, "site", "list") }()
+	go func() { done <- first.run(t, "session", "list") }()
 	link := linkIn(t, rec, 1)
 	page := browsertest.Drive(t, pages, browsertest.Fragment(link), "submit", `{"passphrase":"`+testPass+`"}`, "").Msg
 	if !strings.Contains(page, "Done") {
@@ -92,7 +92,7 @@ func TestADaemonLocksItselfAfterTheIdleTimeAndTheNextCommandHasToAsk(t *testing.
 	r.viaDaemon(sock)
 	_ = app
 
-	if code := r.run(t, "site", "list"); code != 0 {
+	if code := r.run(t, "session", "list"); code != 0 {
 		t.Fatalf("exit %d: %s", code, r.errOut.String())
 	}
 	if r.vault.State() != vault.Unlocked {
@@ -102,7 +102,7 @@ func TestADaemonLocksItselfAfterTheIdleTimeAndTheNextCommandHasToAsk(t *testing.
 	if st := r.vault.State(); st != vault.Locked {
 		t.Fatalf("the daemon's vault is %v after the idle time; the documents say it locks", st)
 	}
-	code := r.run(t, "site", "list")
+	code := r.run(t, "session", "list")
 	if code == 0 {
 		t.Fatalf("a locked daemon answered a tool that needs the vault: %s", r.out.String())
 	}
@@ -118,7 +118,7 @@ func TestUseKeepsADaemonOpenPastTheIdleTime(t *testing.T) {
 	sock, _ := r.startDaemon(t)
 	r.viaDaemon(sock)
 	for i := 0; i < 4; i++ {
-		if code := r.run(t, "site", "list"); code != 0 {
+		if code := r.run(t, "session", "list"); code != 0 {
 			t.Fatalf("run %d (the daemon locked while it was in use): exit %d: %s", i, code, r.errOut.String())
 		}
 		time.Sleep(300 * time.Millisecond)

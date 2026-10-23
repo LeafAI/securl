@@ -310,7 +310,8 @@ Every tool has a title and an output schema. Read-only resources: `securl://site
 `vault_status`, `vault_unlock`, `session_open`, `session_wait`, `site_list`, `session_list`, `session_close`, `archery_instances`, `archery_groups`, `archery_query`,
 `archery_run_sql`, `archery_wait`, `archery_workflow_status`, `archery_cancel`, `db_targets`, `db_query`, `db_exec`.
 Long operations return a `pending` result with an id after `max_block_seconds`; resume with `session_wait` /
-`archery_wait`.
+`archery_wait`. `session_close` is one of them: it closes nothing until a person has typed `DELETE` on a page that names the
+sessions (a database account is a password that cannot be recovered), so it answers `pending` and is resumed with its `close_id`.
 
 ## From the command line
 

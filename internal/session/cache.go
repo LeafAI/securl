@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"sync"
 	"time"
 
@@ -244,6 +245,62 @@ func (c *Cache) Delete(key string) bool {
 		})
 	}
 	return ok
+}
+
+// Keys are the names of the sessions that exist, in order: those in memory and those that another process stored in the vault. They are
+// the keys of the cache (a site's address, or db://<target>), never anything a session holds, so they may be shown to a person and
+// written in a message. The order is fixed so that what a person is shown does not change between two looks.
+func (c *Cache) Keys() []string {
+	seen := map[string]bool{}
+	c.mu.Lock()
+	for k := range c.m {
+		seen[k] = true
+	}
+	c.mu.Unlock()
+	if c.store != nil {
+		for k := range c.store.load() {
+			seen[k] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// RemoveKeys removes the named sessions, from memory and from the vault, and returns how many sessions that was (a session named
+// twice, or held in memory and in the vault both, is one). It removes those names and no others: a session that was made after the
+// names were taken is not among them, which is what lets a person agree to a list and have that list, and not more, go.
+func (c *Cache) RemoveKeys(keys []string) int {
+	want := map[string]bool{}
+	for _, k := range keys {
+		if k != "" {
+			want[k] = true
+		}
+	}
+	if len(want) == 0 {
+		return 0
+	}
+	removed := map[string]bool{}
+	c.mu.Lock()
+	for k := range want {
+		if _, ok := c.m[k]; ok {
+			removed[k] = true
+			delete(c.m, k)
+		}
+	}
+	c.mu.Unlock()
+	c.persist(func(m map[string]record) {
+		for k := range want {
+			if _, ok := m[k]; ok {
+				removed[k] = true
+				delete(m, k)
+			}
+		}
+	})
+	return len(removed)
 }
 
 func (c *Cache) Clear() int {

@@ -373,6 +373,8 @@ func TestEveryFieldTheSkillNamesIsOneTheToolsTake(t *testing.T) {
 		"per_page": true,
 		// A file of the repository that the install steps download: the public key of the release.
 		"allowed_signers": true,
+		// Error codes of closing sessions: held to the source by TestTheErrorCodesTheSkillNamesAreOnesTheServerSends.
+		"close_pending": true, "bad_confirmation": true,
 	}
 	skill := readSkill(t)
 	for _, m := range regexp.MustCompile("`([a-z]+(?:_[a-z]+)+)`").FindAllStringSubmatch(skill, -1) {
@@ -472,6 +474,146 @@ func TestEveryToolCommandTheDocumentsNameIsReal(t *testing.T) {
 		c.Env = append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, "cfg"), "XDG_RUNTIME_DIR="+shortRuntimeDir(t))
 		if out, err := c.CombinedOutput(); err != nil {
 			t.Errorf("the documents tell somebody to type `securl %s`, which is not a command: %v\n%s", cmd, err, out)
+		}
+	}
+}
+
+// What was found by installing the package and using every tool on a real machine is in the skill and the README, in the places an
+// agent and a person look for it: the way to tell that the new version is the one that runs, how an upgrade over a running
+// daemon is done, and what the answers of closing a session mean.
+
+func TestInstallSaysHowToTellWhichCopyRunsAndThatTheDaemonIsTheNewVersion(t *testing.T) {
+	s := readSkill(t)
+	for _, want := range []string{
+		"securl daemon status", // says the version of the daemon next to the command's
+		"command -v securl",
+		"~/go/bin",
+		"version",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the install section lacks %q", want)
+		}
+	}
+	// the real failure: an older copy earlier on PATH answered `securl unlock` and nobody was sent a link
+	if !regexp.MustCompile(`(?is)another copy|an older copy|older copy`).MatchString(s) {
+		t.Error("it must say that an older copy earlier on PATH is what to look for when a command behaves like the old version")
+	}
+	if !strings.Contains(s, "daemon is version") && !strings.Contains(s, "the daemon is another version") && !strings.Contains(s, "different version") {
+		t.Error("it must say what the note about a daemon of another version means (an upgrade that did not restart it)")
+	}
+}
+
+func TestUpdateHasTheMacPackageAndSaysWhatHappensToARunningDaemon(t *testing.T) {
+	s := readSkill(t)
+	i := strings.Index(s, "## 2. Update")
+	j := strings.Index(s, "## 3. Set up")
+	if i < 0 || j < i {
+		t.Fatal("the skill must have an Update section before Set up")
+	}
+	u := s[i:j]
+	for _, want := range []string{"securl_macos.pkg", "sudo installer", "locked", "securl unlock", "securl daemon status"} {
+		if !strings.Contains(u, want) {
+			t.Errorf("Update lacks %q: the package is a way to install, so it is a way to update", want)
+		}
+	}
+	if !regexp.MustCompile(`(?is)running daemon|daemon (is|that is) running|restarts the daemon|replaces the daemon`).MatchString(u) {
+		t.Error("Update must say that the package restarts a running daemon, which then starts locked")
+	}
+}
+
+func TestTheInstallGuideSaysWhatToDoWhenTheDaemonIsNotRunningAfterTheInstaller(t *testing.T) {
+	for _, f := range []string{skillFile, "README.md"} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := string(b)
+		if !strings.Contains(s, "not loaded") {
+			t.Errorf("%s must say what `securl daemon status` shows when the installer could not start the daemon (\"not loaded\")", f)
+		}
+		if !strings.Contains(s, "sudo securl daemon install") {
+			t.Errorf("%s must give the way to start it by hand: sudo securl daemon install", f)
+		}
+		if !strings.Contains(s, "/var/log/install.log") {
+			t.Errorf("%s must say where the installer's own account of what it did is: /var/log/install.log", f)
+		}
+	}
+}
+
+func TestSkillExplainsTheAnswersOfClosingSessions(t *testing.T) {
+	s := readSkill(t)
+	for _, want := range []string{"close_pending", "bad_confirmation", "close_id"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the skill must explain %q", want)
+		}
+	}
+	i := strings.Index(s, "## 6. When something fails")
+	if i < 0 {
+		t.Fatal("no failure table")
+	}
+	table := s[i:]
+	for _, want := range []string{"close_pending", "bad_confirmation"} {
+		if !strings.Contains(table, want) {
+			t.Errorf("the table of failures must have a row for %q", want)
+		}
+	}
+}
+
+func TestSkillSaysWhichToolsAnswerWhileTheVaultIsLockedAndWhatTheCommandsDoWithArchery(t *testing.T) {
+	s := readSkill(t)
+	if !regexp.MustCompile("(?s)vault_status.{0,200}site_list.{0,200}db_targets|db_targets.{0,200}while the vault is locked").MatchString(s) {
+		t.Error("the skill must say that vault_status, site_list and db_targets answer while the vault is locked (db_targets without has_session)")
+	}
+	if !strings.Contains(s, "securl archery") {
+		t.Error("the Archery commands must be in the skill, with what they do when there is no session: they wait for the login and print the real answer")
+	}
+	if !regexp.MustCompile(`(?is)archery.{0,400}(waits? for|asks? the person).{0,200}login`).MatchString(s) {
+		t.Error("it must say that an Archery command with no session waits for the person's login and then prints its own answer")
+	}
+}
+
+func TestSetupRecommendsAnAllowListOfDatabasesForATarget(t *testing.T) {
+	s := readSkill(t)
+	if !strings.Contains(s, "databases") || !strings.Contains(s, "allow") {
+		t.Fatal("setup must mention the list of databases of a target")
+	}
+	if !regexp.MustCompile(`(?is)(list|name)[^.]{0,120}databases?[^.]{0,200}(any|every|whatever)[^.]{0,120}(is|are) (tried|accepted|allowed)|without (a )?list[^.]{0,160}any database`).MatchString(s) {
+		t.Error("it must say that a target with no list of databases accepts any database name, so listing them is the safe setting")
+	}
+}
+
+// An error code named in the skill (the table of failures, the answers of closing sessions) must be one that the server sends: a code
+// that is only in the text sends an agent looking for an answer that never comes.
+func TestTheErrorCodesTheSkillNamesAreOnesTheServerSends(t *testing.T) {
+	var src strings.Builder
+	files, err := filepath.Glob("internal/mcpserver/*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src.Write(b)
+	}
+	skill := readSkill(t)
+	i := strings.Index(skill, "## 6. When something fails")
+	rows := regexp.MustCompile("(?m)^\\| `([a-z_]+)`").FindAllStringSubmatch(skill[i:], -1)
+	if len(rows) < 10 {
+		t.Fatalf("the table of failures was not read: %d rows", len(rows))
+	}
+	for _, r := range rows {
+		if !strings.Contains(src.String(), `"`+r[1]+`"`) {
+			t.Errorf("the table names the code %q, which no server code sends", r[1])
+		}
+	}
+	for _, code := range []string{"close_pending", "bad_confirmation", "user_rejected", "rate_limited"} {
+		if !strings.Contains(src.String(), `"`+code+`"`) {
+			t.Errorf("the server does not send %q", code)
 		}
 	}
 }

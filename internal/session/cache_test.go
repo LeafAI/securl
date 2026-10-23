@@ -630,3 +630,95 @@ func TestAFreshSessionIsNotProbedEvenWhenTheSiteIsDown(t *testing.T) {
 		t.Error("kept")
 	}
 }
+
+// ---- Keys and RemoveKeys: what the confirmation of session_close is built on ----
+
+func putThree(t *testing.T, c *Cache) {
+	t.Helper()
+	for _, h := range []string{"https://b.example", "https://a.example", "https://c.example"} {
+		u, _ := url.Parse(h)
+		c.Put(u, probeDriver{}, sample("good"))
+	}
+}
+
+func TestKeysAreTheNamesOfTheSessionsInOrderAndNeverTheirContents(t *testing.T) {
+	dir := t.TempDir()
+	c := NewPersistent(NewStore(openVault(t, dir)))
+	putThree(t, c)
+	got := c.Keys()
+	want := []string{"https://a.example", "https://b.example", "https://c.example"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("Keys() = %v, want %v (sorted, so that what a person is shown does not change from one look to the next)", got, want)
+	}
+	for _, k := range got {
+		if strings.Contains(k, "good") || strings.Contains(k, "cookie") {
+			t.Errorf("a key holds session content: %q", k)
+		}
+	}
+	// a second process's sessions are in the vault too: the names include them
+	other := NewPersistent(NewStore(openVault(t, dir)))
+	u, _ := url.Parse("https://d.example")
+	other.Put(u, probeDriver{}, sample("good"))
+	if got := c.Keys(); len(got) != 4 {
+		t.Errorf("a session stored by another process is not in the names: %v", got)
+	}
+}
+
+func TestRemoveKeysRemovesExactlyTheNamedOnesFromMemoryAndFromTheVault(t *testing.T) {
+	dir := t.TempDir()
+	c := NewPersistent(NewStore(openVault(t, dir)))
+	putThree(t, c)
+	n := c.RemoveKeys([]string{"https://a.example", "https://c.example"})
+	if n != 2 {
+		t.Errorf("removed %d, want 2", n)
+	}
+	if got := c.Keys(); strings.Join(got, ",") != "https://b.example" {
+		t.Errorf("left: %v", got)
+	}
+	// a fresh process finds the same: it was removed from the vault, not only from this cache's memory
+	if got := NewPersistent(NewStore(openVault(t, dir))).Keys(); strings.Join(got, ",") != "https://b.example" {
+		t.Errorf("the vault still holds %v", got)
+	}
+}
+
+// The set that a person agreed to is the set that goes: a session made after the question was asked is not theirs to have agreed
+// to, and it stays.
+func TestRemoveKeysLeavesASessionThatWasMadeAfterTheNamesWereTaken(t *testing.T) {
+	c := NewPersistent(NewStore(openVault(t, t.TempDir())))
+	putThree(t, c)
+	names := c.Keys() // what the person is shown
+	u, _ := url.Parse("https://new.example")
+	c.Put(u, probeDriver{}, sample("good")) // made while they were deciding
+	c.RemoveKeys(names)
+	got := c.Keys()
+	if len(got) != 1 || got[0] != "https://new.example" {
+		t.Errorf("only the new session should be left, got %v", got)
+	}
+}
+
+func TestRemoveKeysIgnoresNamesThatAreNotThereAndEmptyInput(t *testing.T) {
+	c := NewPersistent(NewStore(openVault(t, t.TempDir())))
+	putThree(t, c)
+	if n := c.RemoveKeys([]string{"https://nope.example"}); n != 0 {
+		t.Errorf("removed %d of a session that is not there", n)
+	}
+	if n := c.RemoveKeys(nil); n != 0 {
+		t.Errorf("removed %d with no names", n)
+	}
+	if n := c.RemoveKeys([]string{""}); n != 0 {
+		t.Errorf("removed %d for an empty name", n)
+	}
+	if len(c.Keys()) != 3 {
+		t.Errorf("sessions were lost: %v", c.Keys())
+	}
+}
+
+func TestRemoveKeysCountsASessionOnceWhetherItIsInMemoryTheVaultOrBoth(t *testing.T) {
+	dir := t.TempDir()
+	c := NewPersistent(NewStore(openVault(t, dir)))
+	u, _ := url.Parse("https://a.example")
+	c.Put(u, probeDriver{}, sample("good")) // in memory and in the vault
+	if n := c.RemoveKeys([]string{"https://a.example", "https://a.example"}); n != 1 {
+		t.Errorf("removed %d for one session named twice", n)
+	}
+}

@@ -229,6 +229,10 @@ securl config totp off link       # switch off, keep the secret (so your authent
   holds cookies, tokens, passwords or SQL text (only its length and a short hash).
   Handy questions: `grep '"event":"human_request"' audit.jsonl` (which logins reached a person),
   `grep '"event":"human_round"' audit.jsonl` (every message sent: password, TOTP, ...), `grep rate_limited audit.jsonl`.
+* `session_close` is asked of a person before it closes anything, because a saved session is what somebody typed once and a
+  database account cannot be recovered. They get a link to a page that lists what goes and type `DELETE`. Its trail:
+  `grep session_close audit.jsonl` shows `session_close_requested`, `session_close_confirmed` and `session_close_declined`,
+  each with the names (a site, or `db://target`) and a count, never a session.
 * `limits:` stops an over-eager agent from flooding the DingTalk group: by default 6 requests per site and 20 overall
   per hour, and a 10-minute pause for a site after somebody pressed Reject. Raise them with
   `securl config set limits.per_site 12`. Cached sessions never count.

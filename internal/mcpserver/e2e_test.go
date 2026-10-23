@@ -248,7 +248,13 @@ func TestLoginTwoRoundsViaBrowser(t *testing.T) {
 	if s, _ := e.call(t, "session_list", nil); len(s["sessions"].([]any)) != 1 || strings.Contains(fmt.Sprint(s), "_gitlab_session") {
 		t.Errorf("sessions: %v", s)
 	}
-	if o, _ := e.call(t, "session_close", map[string]any{"url": e.site.URL}); o["removed"] != float64(1) {
+	o, _ := e.call(t, "session_close", map[string]any{"url": e.site.URL, "max_block_seconds": 1})
+	if o["status"] != "pending" {
+		t.Fatalf("closing a saved session asks a person first: %v", o)
+	}
+	vals, _ := json.Marshal(map[string]string{"confirm": "DELETE"})
+	human(t, e.rec.wait(t, 3), e.dir, "submit", string(vals), "")
+	if o, _ := e.call(t, "session_close", map[string]any{"url": e.site.URL, "close_id": o["login_id"], "max_block_seconds": 20}); o["removed"] != float64(1) {
 		t.Errorf("logout: %v", o)
 	}
 }

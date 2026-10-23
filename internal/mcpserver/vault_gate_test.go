@@ -138,6 +138,16 @@ func TestOnlyStaticToolsWorkWhileLocked(t *testing.T) {
 	if out, isErr := g.call(t, "site_list", map[string]any{}); isErr || out["sites"] == nil {
 		t.Errorf("site_list lists drivers, nothing secret: %v %v", isErr, out)
 	}
+	// db_targets lists what the owner configured; whether a target has an account is the vault's to say, so it is left out
+	// rather than answered as "none": a shut vault must not look like an empty one.
+	if out, isErr := g.call(t, "db_targets", map[string]any{}); isErr || out["targets"] == nil {
+		t.Errorf("db_targets lists the configured targets: %v %v", isErr, out)
+	} else if strings.Contains(fmt.Sprint(out), "has_session:true") {
+		t.Errorf("a locked vault cannot say which targets have an account: %v", out)
+	}
+	if !strings.Contains(instructions, "db_targets (which then lists") {
+		t.Error("the instructions say that db_targets answers while the vault is locked, because it does")
+	}
 	for tool, args := range map[string]map[string]any{
 		"session_list":  {},
 		"session_close": {"all": true},

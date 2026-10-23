@@ -50,6 +50,7 @@ func (s *Server) openCore() error {
 		Notifier: s.notify, LinkViaAgent: s.linkViaAgent(), Tunnels: s.tunnels, PageURL: s.cfg.Web.PageURL, TTL: s.cfg.Web.TTL, Log: s.log,
 		Admit: s.admit, OnRound: s.onRound, OnTunnel: s.onTunnel, Unlock: unlock, Seal: sealing,
 	})
+	c.closer = newCloser(s, c, unlock, sealing)
 	c.tracker = archery.NewTracker(s.cfg.Archery.DDLAllowed(), s.cfg.Archery.WaitTimeout)
 	c.tracker.Poll = s.cfg.Archery.PollInterval
 	s.core = c
@@ -67,6 +68,7 @@ func (s *Server) closeCore() {
 		return
 	}
 	c.mgr.Close()
+	c.closer.mgr.Close()
 	c.keys.Forget()
 }
 

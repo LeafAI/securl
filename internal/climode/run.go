@@ -83,7 +83,12 @@ func Run(ctx context.Context, args []string, env Env) int {
 	}
 	input, err := cmd.parse(rest, env.In)
 	if err != nil {
-		fmt.Fprintf(env.Err, "securl %s: %v (see --help)\n", strings.Join(args[:cmd.words], " "), err)
+		// Some messages of flags.go point to --help themselves, in their own words; it is said once.
+		msg := err.Error()
+		if !strings.Contains(msg, "see --help") {
+			msg += " (see --help)"
+		}
+		fmt.Fprintf(env.Err, "securl %s: %s\n", strings.Join(args[:cmd.words], " "), msg)
 		return exitUsage
 	}
 	return tools.call(ctx, env, cmd, input)

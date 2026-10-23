@@ -26,7 +26,7 @@ See README, "From the command line".
 | `session_wait` | keep waiting for a session that is being opened | up to `max_block_seconds` |
 | `site_list` | list supported sites/drivers | no |
 | `session_list` | list sessions (no secrets) | no |
-| `session_close` | forget session(s) | no |
+| `session_close` | forget session(s), once a person has confirmed on a page | up to `max_block_seconds` |
 | `archery_instances` | list instances/databases the user can use | no |
 | `archery_groups` | list resource groups (and a group's writable instances) | no |
 | `archery_query` | read-only SQL query (no approval) | no |
@@ -255,9 +255,24 @@ Input: `{}`. Output: no secrets, ever.
 
 ## 5. `session_close`
 
-Input: `{ "url": string?, "all": boolean? }` — exactly one of the two (`oneOf`).
-Output: `{ "removed": integer }`. Only forgets the local cache (and cancels a pending flow for that
-site); it does not log out on the server unless the driver supports it (`server_logout: bool` in output).
+Input: `{ "url": string?, "all": boolean?, "reason": string?, "close_id": string?, "max_block_seconds": integer? }` — exactly
+one of `url` and `all`. Output: `{ "status": "closed" | "pending", "removed": integer, ... }`.
+
+Closing forgets what a person typed, and a database account is a password nobody can give back, so **nothing is closed until
+a person has confirmed it**. The call computes the saved sessions in scope, and if there are none it answers
+`{"status":"closed","removed":0}` and bothers nobody. Otherwise the person gets the usual link (DingTalk, or the answer with
+`security.link_via_agent`) to a page that names every session that goes (`db://target` for a database, where the message
+says the account is lost) and asks them to type `DELETE`. Until then the answer is `pending` with a `login_id`: call again
+with it as `close_id`, and the same `url` or `all` (an id made for one scope is refused for another). Three wrong words end
+the request (`bad_confirmation`); **Reject** answers `user_rejected` and starts the cool-down of `limits.reject_cooldown`
+(`rate_limited`); a person who does not answer in time gets `human_timeout`. Only the sessions that were named when the question
+was asked are closed, never sessions made while the person was deciding, and an id works once. No argument stands for the
+person's word: `confirm`, `force`, `yes` and the like are refused (`invalid_argument`).
+
+A login that is still being opened for one URL is cancelled at once, with no question: nothing is saved yet. Audit events:
+`session_close_requested`, `session_close_confirmed`, `session_close_declined`, `session_close_wrong_word`; they hold names
+and counts, never a session. A session the cache drops by itself (expired, refused by the site) is not asked about: it is
+logged as `session_dropped`. It forgets the local session only; it does not log out on the server.
 
 ## 6. `archery_instances`
 
@@ -380,7 +395,7 @@ Archery, where a person approves each change.
 
 The account is typed once by a person: `session_open` with `url: "db://<target>"` sends the usual DingTalk link, the page
 asks for a username and a password, and securl checks them by connecting. The pair is kept in the vault like any other
-session; `session_close` with the same URL forgets it. The agent never sees the **password**: it appears in no answer, no
+session; `session_close` with the same URL forgets it (after a person has confirmed, as for every session). The agent never sees the **password**: it appears in no answer, no
 error, no audit line and no message, and an answer that echoes it (a query of `current_setting`, a table that holds it)
 has it removed from every value, column name and error (`redactions` counts them). The user name is not a secret (the
 database tells it to anybody in `CURRENT_USER()` and in every list of grants) and is not removed: removing it damaged
