@@ -260,16 +260,119 @@ them to type `DELETE`; until they do, the answer is `pending` with a `login_id`.
 
 ### Command line
 
-The same tools are commands, for the user's terminal or a script of theirs: `securl session open --url ...`,
-`securl request --url ... --method GET --path ...`, `securl db query --target ... --sql ...`. Run `securl <group> <command>
---help` for the flags. The answer is JSON on standard output; progress is on standard error; exit `4` means a person has
-not answered yet (continue with `securl session wait --login-id ...`).
+Every tool is also a command, for the user's terminal or a script, and the commands are what to use when you have a shell and
+no MCP connection (or when the user asks for a command to run). **Prefer the MCP tools when you have them.** Nothing here
+works differently from the tool of the same name: the same checks, the same limits, the same audit trail, and no answer ever
+carries a credential. With no arguments (or only `-config`), `securl` is still the MCP server on standard input and output.
 
-- Prefer the MCP tools when you have them. Use the commands when the user asks for a command to run, or when you are the one
-  with a shell and no MCP connection.
 - **Never ask the user for the vault passphrase, and never put it in a command, a pipe or the environment.** In a terminal the
-  command asks for it itself. In your own shell there is no terminal, so the command opens the vault with a link for the user
-  and waits: tell the user to watch DingTalk.
+  command asks for it itself, in a process of its own. With a daemon, or with no terminal (your own shell), nothing is typed: the
+  command opens the vault with a link for the user (DingTalk, or on standard error with `security.link_via_agent`) and waits. Tell
+  the user to watch for it.
+- The name of a command is the name of its tool: `session_open` is `securl session open`, `archery_run_sql` is `securl archery
+  run-sql`. `securl <group> <command> --help` prints its flags; **a flag is the name of the tool's field with `-` for `_`**
+  (`max_block_seconds` is `--max-block-seconds`).
+
+#### Command line reference
+
+| The tool | The command |
+|---|---|
+| `session_open` | `securl session open` |
+| `session_wait` | `securl session wait` |
+| `session_list` | `securl session list` |
+| `session_close` | `securl session close` |
+| `site_list` | `securl site list` |
+| `request` | `securl request` |
+| `db_targets` | `securl db targets` |
+| `db_query` | `securl db query` |
+| `db_exec` | `securl db exec` |
+| `archery_instances` | `securl archery instances` |
+| `archery_groups` | `securl archery groups` |
+| `archery_query` | `securl archery query` |
+| `archery_run_sql` | `securl archery run-sql` |
+| `archery_wait` | `securl archery wait` |
+| `archery_workflow_status` | `securl archery workflow-status` |
+| `archery_cancel` | `securl archery cancel` |
+
+`vault_status` and `vault_unlock` are not commands: `securl vault status` (text) and `securl unlock` do their work.
+
+**Sessions and sites**
+
+- `securl session open --url <url> [--site <driver>] [--reason <text>] [--force-refresh] [--wait=false] [--max-block-seconds <n>]`
+  opens a session; a person types the credential on a page. `--wait=false` returns the pending answer at once (exit `4`) instead
+  of waiting. A database is `--url db://<target>`.
+- `securl session wait --login-id <id> [--max-block-seconds <n>]` keeps waiting for a login that answered pending.
+- `securl session list` shows which sessions exist. Names and times, never a credential. It needs the vault open.
+- `securl session close (--url <url> | --all) [--reason <text>] [--close-id <id>] [--max-block-seconds <n>]` asks the person to
+  confirm, and waits for them (see "Closing sessions"). `--url` and `--all` are exclusive. Never use `--all` unless the user asked
+  for every session to go.
+- `securl site list` lists the websites securl can handle. It needs no vault.
+
+**Requests**
+
+- `securl request --url <url> --method <GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS> --path </absolute/path> [--query name=value]...
+  [--header name=value]... [--timeout-seconds <n>] [--max-response-bytes <n>] [--follow-redirects]` and **one** body flag:
+  `--json <json>`, `--form name=value` (given again for more fields), `--text <text>` or `--base64 <base64>`. The path has no query
+  string and no host: use `--query`. A name given twice becomes a list (`--query tag=a --query tag=b`). `Cookie`, `Authorization`
+  and `Host` are refused as `--header`. The answer holds the status, the headers and the body, scrubbed.
+
+**Databases** (PostgreSQL, MySQL; not production)
+
+- `securl db targets` lists the targets and whether each has an account.
+- `securl db query --target <name> --sql <statement> [--database <db>] [--limit <n>]` runs one read-only statement.
+- `securl db exec --target <name> --sql <statement> --reason <text> [--database <db>]` changes data, only on a `read_write`
+  target; `--reason` is required and the team reads it in DingTalk afterwards.
+
+**Archery** (each takes `--url <archery url>`, and `--site <driver>` when the host name does not say Archery)
+
+- `securl archery instances --url <url> [--site <driver>] [--instance <name>]` lists instances, and with `--instance` that
+  instance's databases.
+- `securl archery groups --url <url> [--site <driver>] [--group <name>]` lists resource groups, and with `--group` that group's
+  writable instances.
+- `securl archery query --url <url> [--site <driver>] --instance <name> --database <db> --sql <statement> [--schema <s>]
+  [--limit <n>]` runs one read-only statement, no approval.
+- `securl archery run-sql --url <url> [--site <driver>] --instance <name> --database <db> --resource-group <group> --sql
+  <statement> --title <text> [--remark <text>] [--backup] [--wait=false] [--approval-timeout-seconds <n>]
+  [--max-block-seconds <n>]` submits SQL for approval; it is a real workflow that approvers are told about, so use it only for
+  what the user asked for.
+- `securl archery workflow-status --url <url> [--site <driver>] --workflow-id <id>` reads a workflow's state.
+- `securl archery wait --url <url> [--site <driver>] --workflow-id <id> [--max-block-seconds <n>]` waits for a workflow; it runs it
+  once when it is approved. Safe to repeat.
+- `securl archery cancel --url <url> [--site <driver>] --workflow-id <id> [--reason <text>]` aborts a workflow that has not started
+  executing.
+- With no Archery session, `instances`, `groups` and `query` wait for the person's login and then print **their own answer**.
+
+**Giving a value**
+
+- A text flag takes the text itself, `-` for standard input, or `@<file>` for a file's contents (`--sql @query.sql`,
+  `--sql -`). `@@x` is the text `@x`. One trailing newline is dropped.
+- `--json` takes a JSON value. `--query`, `--header` and `--form` take `name=value` and are given once per pair.
+- A flag takes its value as the next word or after `=` (`--limit 5`, `--limit=5`). A boolean is `--flag` or `--flag=false`:
+  `--wait false` is not a value, it is `--wait` followed by a stray word, which is a usage error.
+- `-config <file>` and `--no-daemon` may stand anywhere in the command. The first uses another configuration file; the second
+  runs the command alone even when a daemon is running (an unlocked daemon is the whole point of one: do not use it to get round it).
+
+**What comes back**
+
+- The answer is JSON on **standard output** and nothing else is. Progress, the waiting-for-a-person line and any link go to
+  **standard error**: read the answer from the first and show the second to the user.
+- The exit code says what kind of end it was:
+  - `0`: the tool answered.
+  - `1`: the tool answered with an error. Its JSON, with `code` and `hint`, is on standard output, and the table in section 6 applies.
+  - `2`: a usage error: the command line was wrong and nothing ran.
+  - `3`: setup: the configuration or the vault could not be set up, or there is no daemon for `securl unlock`.
+  - `4`: pending: a person has not answered yet. The answer says how to continue (`securl session wait --login-id ...`,
+    `securl archery wait --workflow-id ...`).
+- Waiting commands wait by themselves. Do not loop on exit `4`: it is a person, not a fault.
+
+**Commands that are not tools**
+
+- `securl vault init`, `securl vault status` (never asks for the passphrase), `securl vault passwd` and `securl vault migrate`
+  (the vault); `securl unlock` (open a running daemon's vault by link); `securl daemon`, `securl daemon status`, `securl daemon install` and `securl daemon uninstall`; `securl doctor [-send] [-tunnel]
+  [-site <url>]`; `securl config` (section 3), which also has `securl config get <key>`, `securl config unset <key>`,
+  `securl config path`, `securl config site list` and `securl config site remove <host|name>`; `securl page [dir]` (write the login page to a directory, to host it yourself),
+  `securl serve` (the MCP server, by name) and `securl version`. **Do not run `securl vault init`, `securl vault passwd` or `sudo
+  securl daemon install` yourself:** the first two are the user's to type a new passphrase into, and the third needs root.
 
 ### Daemon
 

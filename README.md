@@ -326,6 +326,13 @@ securl db query --target gm-dev-pg --sql @query.sql
 securl archery run-sql --url https://archery.corp.example --instance x --database y --title t --sql - < change.sql
 ```
 
+- Every command, by the tool it runs: `securl session open|wait|list|close`, `securl site list`, `securl request`, `securl db
+  targets|query|exec` and `securl archery instances|groups|query|run-sql|wait|workflow-status|cancel`. `securl session close`
+  asks a person to confirm and waits for them. The flags of a command are `securl <group> <command> --help`. Besides the
+  tools: `securl vault init|status|passwd|migrate`, `securl unlock`, `securl daemon` (and `status`, `install`, `uninstall`),
+  `securl doctor`, `securl config ...`, `securl page [dir]` (write the login page to a directory, to host it yourself),
+  `securl serve` and `securl version`. `-config <file>` and `--no-daemon` may stand anywhere; `--wait=false` makes a command
+  that would wait for a person print the pending answer and exit `4` at once.
 - A tool `group_name` is `securl group name` (`archery_run_sql` is `securl archery run-sql`); a tool with no group is one
   word (`securl request`). A field is a flag with its dashes (`max_block_seconds` is `--max-block-seconds`); `--help` lists
   them, with the tool's own description. The flags are read from the tool's input schema, so a field added to a tool is a flag
