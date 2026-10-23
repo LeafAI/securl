@@ -304,3 +304,198 @@ func TestThePublishJobFetchesTheSignatureIntoDistAndChecksItBeforeReplacingTheRe
 		t.Errorf("sign uploads %q under the name publish downloads; it must be the signature file", uploaded)
 	}
 }
+
+// ---- the macOS package ----
+//
+// The package is made on a Mac, after the archives, and it must be in the list that is signed. A package that is not in
+// SHA256SUMS is published next to a signature that says nothing about it, and a user who checks the signature and the hash of an
+// archive would trust a .pkg that neither covers. These tests hold the chain: build -> macos -> sign -> publish, and one source for
+// the sums.
+
+type artifactStep struct {
+	Uses string
+	Name string
+	Path string
+	Run  string
+}
+
+func stepsOf(t *testing.T, job string) []artifactStep {
+	t.Helper()
+	w, _ := loadKeyed(t, ".github/workflows/nightly.yml")
+	var out []artifactStep
+	for _, s := range w.Jobs[job].Steps {
+		a := artifactStep{Name: s.Name, Run: s.Run}
+		if u, ok := s.With["name"].(string); ok {
+			a.Name = u
+		}
+		if p, ok := s.With["path"].(string); ok {
+			a.Path = p
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+func needsOf(t *testing.T, job string) []string {
+	t.Helper()
+	b, _ := os.ReadFile(".github/workflows/nightly.yml")
+	var w struct {
+		Jobs map[string]struct {
+			Needs  any    `yaml:"needs"`
+			RunsOn string `yaml:"runs-on"`
+			If     string `yaml:"if"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(b, &w); err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	switch n := w.Jobs[job].Needs.(type) {
+	case string:
+		out = []string{n}
+	case []any:
+		for _, x := range n {
+			out = append(out, x.(string))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestThePackageIsMadeOnAMacAfterTheArchivesAndBeforeTheSignature(t *testing.T) {
+	b, _ := os.ReadFile(".github/workflows/nightly.yml")
+	var w struct {
+		Jobs map[string]struct {
+			RunsOn string `yaml:"runs-on"`
+			If     string `yaml:"if"`
+		} `yaml:"jobs"`
+	}
+	yaml.Unmarshal(b, &w)
+	if !strings.HasPrefix(w.Jobs["macos"].RunsOn, "macos-") {
+		t.Errorf("the package needs pkgbuild, productbuild and lipo, which are on a Mac only; runs-on: %q", w.Jobs["macos"].RunsOn)
+	}
+	if got := strings.Join(needsOf(t, "macos"), ","); got != "build" {
+		t.Errorf("macos needs the archives build made, and nothing else; needs: %s", got)
+	}
+	if got := strings.Join(needsOf(t, "sign"), ","); got != "build,macos" {
+		t.Errorf("sign must wait for macos: the package is in the sums that are signed; needs: %s", got)
+	}
+	if w.Jobs["macos"].If != "needs.build.outputs.publish == 'true'" {
+		t.Errorf("macos runs for the builds that are published, no more (a pull request does not spend a Mac); if: %q", w.Jobs["macos"].If)
+	}
+}
+
+func TestThePackageIsListedInTheChecksumsBeforeTheyAreSigned(t *testing.T) {
+	steps := stepsOf(t, "macos")
+	made, listed, checked, uploaded := -1, -1, -1, -1
+	for i, s := range steps {
+		switch {
+		case strings.Contains(s.Run, "scripts/macos-pkg.sh"):
+			made = i
+		case strings.Contains(s.Run, "scripts/add-to-sums.sh"):
+			listed = i
+		case strings.Contains(s.Run, "--check --strict SHA256SUMS"):
+			checked = i
+		case s.Name == "securl-nightly-macos":
+			uploaded = i
+		}
+	}
+	if made < 0 || listed < 0 || checked < 0 || uploaded < 0 {
+		t.Fatalf("macos must make the package (%d), list it in the sums (%d), check the sums (%d) and upload (%d)", made, listed, checked, uploaded)
+	}
+	if !(made < listed && listed < checked && checked < uploaded) {
+		t.Errorf("the order is make %d, list %d, check %d, upload %d: each depends on the one before", made, listed, checked, uploaded)
+	}
+	var run string
+	for _, s := range steps {
+		if strings.Contains(s.Run, "add-to-sums.sh") {
+			run = s.Run
+		}
+	}
+	for _, want := range []string{"securl_${VERSION}_macos.pkg", "securl_macos.pkg"} {
+		if !strings.Contains(run, want) {
+			t.Errorf("both names of the package are listed (%s missing): a user who downloads either must find its hash", want)
+		}
+	}
+}
+
+func TestTheSumsHaveOneSourceInTheJobsThatSignAndPublish(t *testing.T) {
+	// build uploads the sums in an artifact of their own and the archives without them; macos uploads the finished sums with the
+	// package; sign and publish download the archives and then the macos artifact, and never the first sums
+	build := stepsOf(t, "build")
+	var archives, sums artifactStep
+	for _, s := range build {
+		switch s.Name {
+		case "securl-nightly":
+			archives = s
+		case "securl-nightly-sums":
+			sums = s
+		}
+	}
+	if archives.Path == "" || !strings.Contains(archives.Path, "!dist/SHA256SUMS") || !strings.Contains(archives.Path, "!dist/SHA1SUMS") {
+		t.Errorf("the artifact of the archives must leave the sums out, or two copies of them reach sign and publish; path: %q", archives.Path)
+	}
+	if !strings.Contains(sums.Path, "dist/SHA256SUMS") || !strings.Contains(sums.Path, "dist/SHA1SUMS") {
+		t.Errorf("the sums are uploaded on their own, for macos to add to; path: %q", sums.Path)
+	}
+	for _, job := range []string{"sign", "publish"} {
+		var names []string
+		for _, s := range stepsOf(t, job) {
+			if strings.HasPrefix(s.Name, "securl-nightly") {
+				names = append(names, s.Name)
+			}
+		}
+		for _, n := range names {
+			if n == "securl-nightly-sums" {
+				t.Errorf("%s downloads the sums that do not list the package", job)
+			}
+		}
+		if len(names) < 2 || names[0] != "securl-nightly" || names[1] != "securl-nightly-macos" {
+			t.Errorf("%s downloads %v: the archives, then what macos made", job, names)
+		}
+	}
+	var macosFrom []string
+	for _, s := range stepsOf(t, "macos") {
+		if strings.HasPrefix(s.Name, "securl-nightly") {
+			macosFrom = append(macosFrom, s.Name)
+		}
+	}
+	if strings.Join(macosFrom, ",") != "securl-nightly,securl-nightly-sums,securl-nightly-macos" {
+		t.Errorf("macos downloads %v and uploads securl-nightly-macos", macosFrom[:min(len(macosFrom), 2)])
+	}
+}
+
+func TestTheMacJobHasNoSecretAndNoWriteAccess(t *testing.T) {
+	w, raw := loadKeyed(t, ".github/workflows/nightly.yml")
+	for _, s := range w.Jobs["macos"].Steps {
+		for _, v := range s.Env {
+			if strings.Contains(v, "secrets.") {
+				t.Errorf("the macos step %q reads a secret: %s", s.Name, v)
+			}
+		}
+	}
+	if w.Jobs["macos"].Environment != nil {
+		t.Errorf("macos names an environment (%v): only sign does", w.Jobs["macos"].Environment)
+	}
+	b, _ := os.ReadFile(".github/workflows/nightly.yml")
+	var perms struct {
+		Jobs map[string]struct {
+			Permissions map[string]string `yaml:"permissions"`
+		} `yaml:"jobs"`
+	}
+	yaml.Unmarshal(b, &perms)
+	if len(perms.Jobs["macos"].Permissions) != 0 {
+		t.Errorf("macos widens the token: %v", perms.Jobs["macos"].Permissions)
+	}
+	if strings.Contains(raw, "macos-latest") && strings.Count(raw, "runs-on: macos") != 1 {
+		t.Errorf("exactly one job runs on a Mac")
+	}
+}
+
+func TestPublishUploadsThePackageAndItsUnversionedCopy(t *testing.T) {
+	// publish-nightly.sh uploads securl_* from the directory: both names of the package match
+	b, _ := os.ReadFile("scripts/publish-nightly.sh")
+	if !strings.Contains(string(b), `"$dir"/securl_*`) {
+		t.Error("publish uploads securl_*, which holds the package under both names")
+	}
+}

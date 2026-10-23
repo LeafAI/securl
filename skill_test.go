@@ -73,7 +73,7 @@ func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 		"vault":   {"init": true, "status": true, "passwd": true, "migrate": true},
 		"session": {"open": true, "wait": true, "list": true, "close": true},
 		"site":    {"list": true},
-		"daemon":  {"status": true},
+		"daemon":  {"status": true, "install": true, "uninstall": true},
 		"db":      {"targets": true, "query": true, "exec": true},
 		"archery": {"instances": true, "groups": true, "query": true, "run-sql": true, "wait": true, "workflow-status": true, "cancel": true},
 	}

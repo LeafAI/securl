@@ -6,6 +6,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,6 +15,7 @@ import (
 	"github.com/LeafAI/securl/internal/climode"
 	"github.com/LeafAI/securl/internal/config"
 	"github.com/LeafAI/securl/internal/daemon"
+	"github.com/LeafAI/securl/internal/daemonlog"
 	"github.com/LeafAI/securl/internal/mcpserver"
 	"github.com/LeafAI/securl/internal/vault"
 )
@@ -27,27 +29,39 @@ func runDaemon(args []string) int {
 	if len(args) > 0 && args[0] == "status" {
 		return daemonStatus(args[1:])
 	}
+	if len(args) > 0 {
+		if handled, code := daemonAgent(args[0], args[1:]); handled {
+			return code
+		}
+	}
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
 	cfgPath := fs.String("config", config.DefaultPath(), "config file")
+	logSpec := fs.String("log", "", `where to write the log instead of standard error: an absolute path, or "default" for Library/Logs/securl-daemon.log in the home of the user who runs it (what the login agent uses: launchd gives a job no terminal)`)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	logOut, closeLog, err := openDaemonLog(*logSpec)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "securl daemon: %v\n", err)
+		return 3
+	}
+	defer closeLog()
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "securl daemon: config: %v\n", err)
+		fmt.Fprintf(logOut, "securl daemon: config: %v\n", err)
 		return 3
 	}
 	sock := climode.SocketPath(climode.Env{Config: cfg})
 	l, err := daemon.Listen(sock)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "securl: %v\n", err)
+		fmt.Fprintf(logOut, "securl: %v\n", err)
 		return 3
 	}
-	logf := func(format string, a ...any) { fmt.Fprintf(os.Stderr, "securl daemon: "+format+"\n", a...) }
+	logf := func(format string, a ...any) { fmt.Fprintf(logOut, "securl daemon: "+format+"\n", a...) }
 	srv, app, err := mcpserver.New(cfg, mcpserver.Options{Log: logf, Vault: vault.New(cfg.Vault.Dir)})
 	if err != nil {
 		l.Close()
-		fmt.Fprintf(os.Stderr, "securl daemon: setup: %v\n", err)
+		fmt.Fprintf(logOut, "securl daemon: setup: %v\n", err)
 		return 3
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -75,14 +89,39 @@ func daemonStatus(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	state, version, err := climode.DaemonState(ctx, climode.Env{Config: cfg, Err: os.Stderr})
+	line := agentStatusLine(path)
 	switch {
 	case err == nil:
 		fmt.Printf("daemon: running (version %s, vault %s) on %s\n", version, state, climode.SocketPath(climode.Env{Config: cfg}))
+		if line != "" {
+			fmt.Println(line)
+		}
 		return 0
 	case climode.IsNotRunning(err):
 		fmt.Printf("daemon: not running (%s)\n", climode.SocketPath(climode.Env{Config: cfg}))
+		if line != "" {
+			fmt.Println(line)
+		}
 		return 1
 	}
 	fmt.Fprintf(os.Stderr, "securl daemon: %v\n", err)
 	return 3
+}
+
+// openDaemonLog is where the daemon's messages go: standard error, or the file that -log names. A log that cannot be opened stops the
+// daemon with the reason: started by launchd with nowhere to say it, it would otherwise run and tell nobody anything.
+func openDaemonLog(spec string) (io.Writer, func(), error) {
+	home, _ := os.UserHomeDir()
+	path, err := daemonlog.Resolve(spec, home)
+	if err != nil {
+		return nil, nil, err
+	}
+	if path == "" {
+		return os.Stderr, func() {}, nil
+	}
+	f, err := daemonlog.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return f, func() { f.Close() }, nil
 }

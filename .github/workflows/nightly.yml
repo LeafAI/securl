@@ -16,6 +16,8 @@ on:
       - "scripts/release.sh"
       - "scripts/publish-nightly.sh"
       - "scripts/sign-release.sh"
+      - "scripts/macos-pkg.sh"
+      - "scripts/add-to-sums.sh"
       - "keys/**"
   workflow_dispatch:
 
@@ -79,18 +81,93 @@ jobs:
         run: |
           sha1sum --check --strict SHA1SUMS
           sha256sum --check --strict SHA256SUMS
+      # Everything but the sums: they are finished by `macos`, which adds the package to them, and the only copy of SHA1SUMS and
+      # SHA256SUMS that `sign` and `publish` ever see is the one in that job's artifact. Two artifacts that both held the sums would
+      # leave it to the order of two downloads which one is used, and the wrong one would sign a list that does not name the package.
       - uses: actions/upload-artifact@v4
         if: steps.decide.outputs.publish != 'skip'
         with:
           name: securl-nightly
-          path: dist/
+          path: |
+            dist/
+            !dist/SHA1SUMS
+            !dist/SHA256SUMS
+          if-no-files-found: error
+      # `macos` starts from the sums that `build` made and adds to them.
+      - uses: actions/upload-artifact@v4
+        if: steps.decide.outputs.publish != 'skip'
+        with:
+          name: securl-nightly-sums
+          path: |
+            dist/SHA1SUMS
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  # The macOS installer package needs Apple's tools (pkgbuild, productbuild, lipo), which exist on a Mac only, so it is made here from
+  # the two darwin binaries that `build` made, not by building again. It is added to SHA256SUMS before `sign` runs, which is the
+  # point: a package that is not in the signed list would be published next to a signature that says nothing about it. This job has
+  # no secret and no token to write with, and runs for the same builds as `sign` (a master schedule or manual run).
+  macos:
+    if: needs.build.outputs.publish == 'true'
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: securl-nightly
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: securl-nightly-sums
+          path: dist
+      - name: Unpack the two darwin builds
+        working-directory: dist
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          mkdir -p ../darwin
+          tar -xzf "securl_${VERSION}_darwin_arm64.tar.gz" -C ../darwin
+          tar -xzf "securl_${VERSION}_darwin_amd64.tar.gz" -C ../darwin
+      - name: Make the package
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          scripts/macos-pkg.sh "$VERSION" \
+            "darwin/securl_${VERSION}_darwin_arm64/securl" "darwin/securl_${VERSION}_darwin_amd64/securl" \
+            "dist/securl_${VERSION}_macos.pkg"
+          cp "dist/securl_${VERSION}_macos.pkg" dist/securl_macos.pkg
+      - name: List the package in the checksums
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: scripts/add-to-sums.sh dist "securl_${VERSION}_macos.pkg" securl_macos.pkg
+      - name: Verify the checksums the way a user will
+        working-directory: dist
+        run: |
+          shasum -a 1 --check --strict SHA1SUMS
+          shasum -a 256 --check --strict SHA256SUMS
+      - name: Look inside the package
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          pkgutil --payload-files "dist/securl_${VERSION}_macos.pkg" | grep -x './securl'
+          pkgutil --expand-full "dist/securl_${VERSION}_macos.pkg" /tmp/pkg-x
+          lipo -archs /tmp/pkg-x/securl-component.pkg/Payload/securl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: securl-nightly-macos
+          path: |
+            dist/securl_*_macos.pkg
+            dist/securl_macos.pkg
+            dist/SHA1SUMS
+            dist/SHA256SUMS
           if-no-files-found: error
 
   # The only job that sees the signing key, and the only one that has it: it can write nothing to the repository or to the
   # release, so a signature cannot be made and published by the same job. The environment lets only `master` read the key.
   sign:
     if: needs.build.outputs.publish == 'true'
-    needs: build
+    needs: [build, macos]
     runs-on: ubuntu-latest
     environment: release-signing
     steps:
@@ -99,6 +176,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: securl-nightly
+          path: dist
+      # What `macos` made: the package, and the sums that list it. The signature is of these sums, and they are the only sums here.
+      - uses: actions/download-artifact@v4
+        with:
+          name: securl-nightly-macos
           path: dist
       - name: Sign SHA256SUMS and check the signature against the published key
         env:
@@ -112,7 +194,7 @@ jobs:
 
   publish:
     if: needs.build.outputs.publish == 'true'
-    needs: [build, sign]
+    needs: [build, macos, sign]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -122,6 +204,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: securl-nightly
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: securl-nightly-macos
           path: dist
       - uses: actions/download-artifact@v4
         with:

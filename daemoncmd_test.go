@@ -94,8 +94,8 @@ func TestACommandReachesTheDaemonProcessAndTheVaultStaysLockedForAnAgentShell(t 
 	}
 	// a tool that needs the vault: with the daemon locked and no way to reach a person, the command ends with an error rather
 	// than opening anything, and says that it is the daemon it spoke to
-	out, errOut, code = run("site", "list")
-	if code == 0 || strings.Contains(out, `"sites"`) {
+	out, errOut, code = run("session", "list")
+	if code == 0 || strings.Contains(out, `"sessions"`) {
 		t.Errorf("a locked daemon answered a tool that needs the vault: %q %q %d", out, errOut, code)
 	}
 	if strings.Contains(errOut, "no daemon") {
@@ -224,5 +224,82 @@ func TestSecurlUnlockHelpAndStrayArguments(t *testing.T) {
 	_, errOut, code = runBinary(t, cfg, "unlock", "--no-daemon", "-config", cfg)
 	if code != 2 || !strings.Contains(errOut, "--no-daemon") {
 		t.Errorf("--no-daemon is refused as meaningless: exit %d: %s", code, errOut)
+	}
+}
+
+// Started by launchd the daemon has no terminal, and launchd throws away what it writes to standard error unless the plist names a
+// file; it cannot name one for every user. So the daemon is told `-log default` and writes, for the user it runs as, to
+// ~/Library/Logs/securl-daemon.log, from the HOME that launchd gave it.
+func TestDaemonLogDefaultWritesTheLogInTheHomeOfWhoRunsIt(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "sdl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	home := filepath.Join(dir, "home")
+	os.MkdirAll(home, 0o700)
+	sock := filepath.Join(dir, "d.sock")
+	cfg := filepath.Join(dir, "config.yaml")
+	os.WriteFile(cfg, []byte("vault:\n  dir: "+filepath.Join(dir, "vault")+"\ndaemon:\n  socket: "+sock+"\n"), 0o600)
+	cmd := exec.Command(binary(t), "daemon", "-config", cfg, "-log", "default")
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	var stderr safeBuf
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
+	logPath := filepath.Join(home, "Library", "Logs", "securl-daemon.log")
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(logPath); err == nil && strings.Contains(string(b), "listening") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	b, err := os.ReadFile(logPath)
+	if err != nil || !strings.Contains(string(b), "listening on") {
+		t.Fatalf("the log is not in the home of the user: %v %q\nstderr: %s", err, b, stderr.String())
+	}
+	if st, _ := os.Stat(logPath); st.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v", st.Mode().Perm())
+	}
+	if stderr.String() != "" {
+		t.Errorf("with -log nothing goes to standard error (launchd would throw it away); got: %q", stderr.String())
+	}
+	cmd.Process.Signal(syscall.SIGTERM)
+	cmd.Wait()
+	b, _ = os.ReadFile(logPath)
+	if !strings.Contains(string(b), "stopped") {
+		t.Errorf("the log records the stop: %q", b)
+	}
+}
+
+// A user's own HOME, not a path of someone else's: two users who each run the daemon get each their own log.
+func TestDaemonLogDefaultIsPerUserNotPerMachine(t *testing.T) {
+	for _, home := range []string{"/Users/alice", "/Users/bob"} {
+		got, _ := daemonlogResolve("default", home)
+		if !strings.HasPrefix(got, home+"/") {
+			t.Errorf("home %s: log %s", home, got)
+		}
+	}
+}
+
+func TestDaemonRefusesALogItCannotOpenAndSaysWhich(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.yaml")
+	os.WriteFile(cfg, []byte("daemon:\n  socket: /tmp/securl-unused/d.sock\n"), 0o600)
+	blocker := filepath.Join(dir, "afile")
+	os.WriteFile(blocker, []byte("x"), 0o600)
+	out, err := exec.Command(binary(t), "daemon", "-config", cfg, "-log", filepath.Join(blocker, "x.log")).CombinedOutput()
+	if err == nil {
+		t.Fatalf("started with a log that cannot be opened:\n%s", out)
+	}
+	if !strings.Contains(string(out), blocker) {
+		t.Errorf("the error names the log:\n%s", out)
+	}
+	out, err = exec.Command(binary(t), "daemon", "-config", cfg, "-log", "relative.log").CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "absolute") {
+		t.Errorf("a relative log is refused, saying why: %v\n%s", err, out)
 	}
 }
