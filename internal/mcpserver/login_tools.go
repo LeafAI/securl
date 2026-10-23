@@ -140,8 +140,18 @@ func (s *Server) await(ctx context.Context, req *mcp.CallToolRequest, f *flow.Fl
 	defer timer.Stop()
 	var n float64
 	s.progress(ctx, req, &n, describe(f))
+	var fresh <-chan time.Time // with the link going to the agent, a link it has not been handed yet ends the wait
+	if f.ViaAgent() {
+		lt := time.NewTicker(50 * time.Millisecond)
+		defer lt.Stop()
+		fresh = lt.C
+	}
 	for {
 		select {
+		case <-fresh:
+			if _, ok := f.ClaimLink(); ok {
+				return pendingOut(f), nil
+			}
 		case <-f.Done():
 			r := f.Result()
 			if r.Err != nil {
@@ -163,6 +173,9 @@ func describe(f *flow.Flow) string {
 	sn := f.Snapshot()
 	switch sn.Phase {
 	case "waiting_human":
+		if f.ViaAgent() {
+			return fmt.Sprintf("waiting for the human to complete the %q step on %s (the link was handed to the agent)", sn.Mode, f.Base.Host)
+		}
 		return fmt.Sprintf("waiting for the human to complete the %q step on %s (DingTalk link sent)", sn.Mode, f.Base.Host)
 	case "working":
 		return "logging in to " + f.Base.Host
@@ -175,7 +188,20 @@ func describe(f *flow.Flow) string {
 func pendingOut(f *flow.Flow) *LoginOutput {
 	sn := f.Snapshot()
 	return &LoginOutput{Status: "pending", Site: f.Site, BaseURL: f.Base.String(), LoginID: f.ID,
-		WaitingFor: sn.Mode, Round: sn.Round, ExpiresAt: fmtTime(sn.ExpiresAt), NextTool: nextSessionWait}
+		WaitingFor: sn.Mode, Round: sn.Round, ExpiresAt: fmtTime(sn.ExpiresAt), NextTool: nextSessionWait,
+		LinkHandover: handover(sn, "the login page")}
+}
+
+// handover is the link part of a pending answer: empty unless the flow hands its link to the agent and a person is
+// being waited for. The instruction is written by securl, not by the site or the agent, and says what the agent may do.
+func handover(sn flow.Snapshot, what string) LinkHandover {
+	if sn.Link == "" {
+		return LinkHandover{}
+	}
+	return LinkHandover{Link: sn.Link, KeyCode: sn.KeyCode, Instruction: "Show this link to the user exactly as it is, and tell them to open " +
+		what + " and type there what it asks for. Tell them the key code, which the page shows too: if they differ, they must not type anything. " +
+		"Do not open the link yourself, do not change it, and do not say it is anything else. Then call the tool named in next_tool; " +
+		"it waits for the user. Describe the request honestly: it was made by you, for the reason you gave."}
 }
 
 // sessionOutput describes a session without any of its credentials.

@@ -53,7 +53,7 @@ Codes: `invalid_argument`, `unsupported_site`, `human_timeout` (nobody completed
 `user_rejected` (the human pressed Reject on the page; `message` carries their optional reason, not retryable),
 `rate_limited` (too many requests to people, or the site was just rejected; `retryable`, carries a hint not to loop),
 `bad_credentials`, `login_rejected` (site refused, e.g. account locked / captcha), `tunnel_unavailable`,
-`notify_failed` (DingTalk), `site_unreachable`, `ddl_disabled`, `sql_check_failed`, `archery_error`,
+`notify_failed` (DingTalk, or no webhook and `link_via_agent` off), `site_unreachable`, `ddl_disabled`, `sql_check_failed`, `archery_error`,
 `workflow_not_found`, `unknown_target`, `target_read_only`, `not_read_only`, `database_not_allowed`, `too_many_rows`, `statement_timeout`, `sql_error`, `session_expired` (a cached session was rejected by the site; call `session_open` with `force_refresh`), `internal`.
 
 **Output schemas and titles.** Every tool advertises a human-readable `title` and an `outputSchema` (generated
@@ -67,7 +67,7 @@ pending answer; no field is `required`, because one result type serves both. A t
 |---|---|
 | `securl://sites` | same as `site_list` |
 | `securl://sessions` | same as `session_list` |
-| `securl://policy` | `allowed_hosts`, `local_addresses_allowed`, `max_block_seconds`, `limits` (per site / total / window / reject cool-down), `archery_ddl_allowed`, `archery_requests_allowed`, `database_targets` (name, environment, mode, allow_ddl; never a host), `audit_enabled`, `human_step_ttl_seconds`, `link_unlock_required`, `sealing_code_required` (which TOTP factors the person is asked for; never a secret or a code) |
+| `securl://policy` | `link_via_agent` (the link goes to the agent, not DingTalk), `allowed_hosts`, `local_addresses_allowed`, `max_block_seconds`, `limits` (per site / total / window / reject cool-down), `archery_ddl_allowed`, `archery_requests_allowed`, `database_targets` (name, environment, mode, allow_ddl; never a host), `audit_enabled`, `human_step_ttl_seconds`, `link_unlock_required`, `sealing_code_required` (which TOTP factors the person is asked for; never a secret or a code) |
 
 **Server instructions.** At connect time the server tells the model how to use the tools: open the vault with `vault_unlock` when it is locked, call `session_open`, on
 `pending` call `session_wait` (never `session_open` again), what to do for each error code, treat cookies as secrets.
@@ -101,6 +101,7 @@ Output
 { "status":"unlocked" }                                               // the person typed the right passphrase
 { "status":"pending", "login_id":"lg_...", "waiting_for":"vault passphrase",
   "expires_at":"...", "next_tool":"vault_unlock" }                    // call again with unlock_id = login_id
+// with security.link_via_agent and no webhook, a pending answer also has "link", "key_code" and "instruction" (see session_open)
 ```
 A call without `unlock_id` while a link is out joins that unlock instead of sending a second link. Errors:
 `vault_not_initialized` (run `securl vault init`), `rate_limited` (wrong passphrases are slowed: 3 free attempts, then
@@ -136,8 +137,17 @@ Output (`oneOf` by `status`)
 { "status":"pending", "login_id":"lg_3f9a...", "site":"gitlab",
   "waiting_for":"login" | "totp" | "custom",      // the current round
   "round":1, "expires_at":"2026-10-10T08:10:00Z", // when the human link stops working
-  "next_tool":"session_wait" }
+  "next_tool":"session_wait",
+  "link":"https://...#...", "key_code":"8885 4F38 DA77 58C0", "instruction":"..." }   // only with link_via_agent, see below
 ```
+**When the link goes to the agent.** With no DingTalk webhook configured and `security.link_via_agent: true`, a `pending`
+answer carries the link of the page (`link`), the code the page shows (`key_code`) and a written `instruction`, and
+nothing is sent to DingTalk. The agent shows the link to the user as it is; the user opens it, compares the key code and types
+the credential there. The call returns as soon as a link exists (a new link for each round, and a replacement if the
+tunnel is replaced); a later `session_wait` that has nothing new blocks up to `max_block_seconds` and answers `pending` with the
+same link, so an agent that lost it can show it again. The link is in no answer once the person has answered, and never in
+the audit log (a `human_round` event says `delivery: "agent"`). A configured webhook always wins: with one, nothing changes.
+`securl://policy` shows `link_via_agent`. What this gives up is in `docs/OPERATING.md`.
 **No result carries a credential, for any site.** The result says that a session exists, for which site, how the site
 authenticates (`auth`) and until when. The cookies, tokens and headers stay in the vault; the `request` tool (and the
 `archery_*` tools) put them into each request and remove them from the answer.

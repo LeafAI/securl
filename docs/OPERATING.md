@@ -34,6 +34,33 @@ change keeps the previous file as `config.yaml.bak`.
 4. Check: `securl doctor -send` should post a test message. DingTalk rejects it with an `errcode` if the keyword,
    signature or IP rule does not match; the error is printed.
 
+### No robot: the link goes to the agent
+
+Without a webhook securl cannot reach a person by itself, and a login ends in `notify_failed`. If you have no DingTalk (a
+single user on their own machine), set:
+
+```
+securl config set security.link_via_agent true
+```
+
+Then `session_open` and `vault_unlock` return the link in a `pending` answer (`link`, `key_code`, `instruction`), and the agent
+shows it to you. Nothing else changes: the link is still one-shot, still goes through the tunnel, and the page, the key code
+and the two optional TOTP factors work as before. A configured webhook always wins, so adding a robot later needs no other change.
+`securl doctor` says which of the two ways is in use.
+
+What you give up, and what to do about it:
+
+- **A message securl wrote is no longer in front of you.** With a robot, you read "AI agent requests a login to X, for this
+  reason" in a message the agent cannot edit. Now the agent hands you the link and says what it likes about it; securl cannot
+  check that. Open the link only for a login **you** asked for, read the host and the step the page shows, and compare the key
+  code the agent gave with the one on the page. If they differ, type nothing.
+- **The link is in the conversation.** It can end up in the agent's transcript and logs. It stays one-shot (it dies after one
+  round), and with `security.link_totp` on it is encrypted and useless without your code. The credential is never in the
+  conversation either way.
+- **Prefer a second factor.** This mode does not require one, but `security.link_totp` and `security.seal_totp` make a leaked link
+  useless. Use them whenever the credentials are not for a throwaway system.
+- It is meant for a machine you control. For a shared setup, use the robot.
+
 The robot is one-way: it only posts links. Everyone in the group can see them, so use a group of the people who
 may log in. Anyone who opens a link still has to type credentials and match the key code.
 

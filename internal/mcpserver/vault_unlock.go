@@ -40,12 +40,12 @@ func newUnlocker(s *Server) *unlocker {
 	u := &unlocker{s: s, guard: unlockguard.New(unlockguard.Config{}), base: base}
 	u.mgr = flow.NewManager(flow.Config{
 		Keys:     keyring.NewMemoryPool(s.cfg.Keys.MaxUses, s.cfg.Keys.MaxAge),
-		Notifier: s.notify, Tunnels: s.tunnels, PageURL: s.cfg.Web.PageURL, TTL: s.cfg.Vault.UnlockTTL, Log: s.log,
+		Notifier: s.notify, LinkViaAgent: s.linkViaAgent(), Tunnels: s.tunnels, PageURL: s.cfg.Web.PageURL, TTL: s.cfg.Vault.UnlockTTL, Log: s.log,
 		OnTunnel: func(f *flow.Flow, provider string, attempts int) {
 			s.audit.Record(audit.Event{Event: "tunnel", Site: "vault", Tunnel: provider, Attempts: attempts})
 		},
 		OnRound: func(f *flow.Flow, mode string, round int) {
-			s.audit.Record(audit.Event{Event: "vault_unlock_round", Round: round})
+			s.audit.Record(audit.Event{Event: "vault_unlock_round", Round: round, Delivery: s.delivery()})
 		},
 		Purpose: &flow.Purpose{
 			Title:   "Vault unlock",
@@ -155,14 +155,29 @@ func (s *Server) vaultUnlock(ctx context.Context, req *mcp.CallToolRequest, in V
 	return s.awaitUnlock(ctx, req, f, max)
 }
 
+func unlockPending(f *flow.Flow, sn flow.Snapshot) VaultUnlockOutput {
+	return VaultUnlockOutput{Status: "pending", LoginID: f.ID, WaitingFor: "vault passphrase", ExpiresAt: fmtTime(sn.ExpiresAt),
+		NextTool: nextVaultUnlock, LinkHandover: handover(sn, "the page")}
+}
+
 func (s *Server) awaitUnlock(ctx context.Context, req *mcp.CallToolRequest, f *flow.Flow, max time.Duration) (any, *ToolError) {
 	tick := time.NewTicker(5 * time.Second)
 	defer tick.Stop()
 	timer := time.NewTimer(max)
 	defer timer.Stop()
 	var n float64
+	var fresh <-chan time.Time
+	if f.ViaAgent() {
+		lt := time.NewTicker(50 * time.Millisecond)
+		defer lt.Stop()
+		fresh = lt.C
+	}
 	for {
 		select {
+		case <-fresh:
+			if sn, ok := f.ClaimLink(); ok {
+				return unlockPending(f, sn), nil
+			}
 		case <-f.Done():
 			if err := f.Result().Err; err != nil {
 				return nil, unlockErr(err)
@@ -172,8 +187,7 @@ func (s *Server) awaitUnlock(ctx context.Context, req *mcp.CallToolRequest, f *f
 			}
 			return VaultUnlockOutput{Status: "unlocked"}, nil
 		case <-timer.C:
-			sn := f.Snapshot()
-			return VaultUnlockOutput{Status: "pending", LoginID: f.ID, WaitingFor: "vault passphrase", ExpiresAt: fmtTime(sn.ExpiresAt), NextTool: nextVaultUnlock}, nil
+			return unlockPending(f, f.Snapshot()), nil
 		case <-tick.C:
 			s.progress(ctx, req, &n, "waiting for the person to type the vault passphrase (DingTalk link sent)")
 		case <-ctx.Done():

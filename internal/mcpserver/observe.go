@@ -25,7 +25,21 @@ func (s *Server) admit(d site.Driver, base *url.URL, reason string) error {
 
 // onRound audits each message sent to a person: a login with a second factor shows up as two rounds.
 func (s *Server) onRound(f *flow.Flow, mode string, round int) {
-	s.audit.Record(audit.Event{Event: "human_round", Site: f.Site, Host: f.Base.Host, Mode: mode, Round: round})
+	s.audit.Record(audit.Event{Event: "human_round", Site: f.Site, Host: f.Base.Host, Mode: mode, Round: round, Delivery: s.delivery()})
+}
+
+// linkViaAgent reports whether login links go back to the agent: the owner switched it on and there is no DingTalk robot.
+// A configured robot always wins, so adding one later needs no other change.
+func (s *Server) linkViaAgent() bool {
+	return s.cfg.Security.LinkViaAgent && s.cfg.DingTalk.Webhook == ""
+}
+
+// delivery says, for the audit log, how the link of a round reached the person. It names the route, never the link.
+func (s *Server) delivery() string {
+	if s.linkViaAgent() {
+		return "agent"
+	}
+	return "dingtalk"
 }
 
 // onTunnel audits which provider carries a flow's link, and how many tunnels were opened to find one that works.

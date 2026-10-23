@@ -60,7 +60,14 @@ func runDoctor(args []string) int {
 		report(true, "config", *cfgPath)
 	}
 
-	report(cfg.DingTalk.Webhook != "", "dingtalk webhook", map[bool]string{true: "configured", false: "missing: run `securl config init` (or set dingtalk.webhook / SECURL_DINGTALK_WEBHOOK)"}[cfg.DingTalk.Webhook != ""])
+	switch {
+	case cfg.DingTalk.Webhook != "":
+		report(true, "dingtalk webhook", "configured")
+	case cfg.Security.LinkViaAgent:
+		report(true, "dingtalk webhook", "not configured: security.link_via_agent is on, so login links are returned to the agent to show you (no message from securl is sent)")
+	default:
+		report(false, "dingtalk webhook", "missing: run `securl config init` (or set dingtalk.webhook / SECURL_DINGTALK_WEBHOOK, or set security.link_via_agent: true)")
+	}
 	if _, err := url.Parse(cfg.Web.PageURL); err != nil {
 		report(false, "web.page_url", err.Error())
 	} else {

@@ -116,6 +116,8 @@ securl doctor                          # everything should be [ok]; the vault sh
   the vault and removes the files.
 - `securl config init` needs a DingTalk custom robot (group settings, bots, add bot, custom). Use the signing secret
   (`dingtalk.secret`) or a keyword (`dingtalk.keyword`). Check with `securl doctor -send`.
+- No DingTalk robot (one user on their own machine): `securl config set security.link_via_agent true`. Login and unlock links
+  are then returned to you instead of being sent; see "Link in the answer" in section 4. A configured robot always wins.
 - Check the tunnels from the user's network: `securl doctor -tunnel`. Free providers come and go; put the ones that pass
   first with `securl config set tunnel.order pinggy,localhost.run`.
 - Check each site before the first login (needs no credentials): `securl doctor -site https://gitlab.corp.example`.
@@ -140,7 +142,8 @@ The server starts **locked**. Follow this order and do not skip a step.
 
 1. `vault_status`. It needs no unlock and shows no secret. `state` is `not_initialized`, `locked` or `unlocked`.
    - `not_initialized`: tell the user to run `securl vault init`. Nothing else works until then.
-2. `vault_unlock` when it is `locked`. The user gets a DingTalk link and types the passphrase on that page. The call waits
+2. `vault_unlock` when it is `locked`. The user gets a DingTalk link and types the passphrase on that page. (With no
+   DingTalk robot and `security.link_via_agent`, the `pending` answer carries the link instead: see "Link in the answer".) The call waits
    up to `max_block_seconds` and may return `pending`: call `vault_unlock` again (with `unlock_id` set to the returned
    `login_id`, or with no argument: it joins the same unlock and sends no second link). Repeat until `unlocked`.
 3. `site_list` shows which sites securl can handle and whether each needs a login; `session_list` shows which already have
@@ -171,6 +174,20 @@ The server starts **locked**. Follow this order and do not skip a step.
 
 When `request` answers `401` or `session_expired`, the session ended: call `session_open` with `force_refresh: true`.
 securl never logs in again by itself, so a person is asked each time and you cannot loop on it.
+
+### Link in the answer
+
+With `security.link_via_agent` on and no DingTalk robot, a `pending` answer of `session_open`, `session_wait` or `vault_unlock`
+carries `link`, `key_code` and `instruction`. Nothing was sent to anybody, so you are the only way the user gets the link:
+
+- Show the `link` to the user exactly as it is, say which site (or the vault) it is for and why you asked, and give them the
+  `key_code`: it must equal the code the page shows, and if it does not they must type nothing.
+- Then call the tool named in `next_tool` (`session_wait`, or `vault_unlock` with `unlock_id`). It waits for the user. A second
+  step (a TOTP) comes back as a new `pending` answer with a new link.
+- Never open the link yourself, change it, shorten it, or describe the request as anything other than what it is. Never ask the
+  user to type a credential anywhere but on that page. Never put the link anywhere but in your reply to the user.
+- A `pending` answer with no `link` means nothing new: keep waiting. If the user lost the link, call `session_wait` again: it
+  answers with the same link.
 
 ### Archery SQL
 
@@ -229,7 +246,7 @@ approves each change there. Do not look for another way to reach a host you were
 | `rate_limited` | people were asked too often, or wrong passphrases are being slowed | wait for the retry time |
 | `host_not_allowed` | outside `security.allowed_hosts`, or one of this machine's own addresses | ask the user to change the setting; do not try other spellings |
 | `tunnel_unavailable` | no tunnel carried traffic | the user runs `securl doctor -tunnel` |
-| `notify_failed` | DingTalk refused the message | the user runs `securl doctor -send` |
+| `notify_failed` | DingTalk refused the message, or there is no webhook | the user runs `securl doctor -send`, or sets `security.link_via_agent true` if there is no robot |
 | `site_unreachable` | the site could not be contacted | network, VPN or the `roots` path |
 | `unknown_target` / `database_not_allowed` | a database or target name that is not configured | `db_targets`; use a name it lists |
 | `target_read_only` / `not_read_only` | a change on a read-only target, or a `db_query` that is not one plain read | use `db_exec` on a `read_write` target |

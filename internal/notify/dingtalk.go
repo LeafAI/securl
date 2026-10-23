@@ -38,7 +38,7 @@ func Sign(secret string, tsMillis int64) string {
 // Markdown sends a markdown message.
 func (d *DingTalk) Markdown(ctx context.Context, title, text string) error {
 	if d.Webhook == "" {
-		return fmt.Errorf("dingtalk webhook is not configured (set dingtalk.webhook or SECURL_DINGTALK_WEBHOOK)")
+		return fmt.Errorf("dingtalk webhook is not configured (set dingtalk.webhook or SECURL_DINGTALK_WEBHOOK; or the owner can set security.link_via_agent: true to have the login link returned to the agent instead)")
 	}
 	if d.Keyword != "" {
 		title = d.Keyword + " " + title

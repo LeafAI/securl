@@ -23,6 +23,8 @@ type Policy struct {
 	HumanTTLSeconds        int  `json:"human_step_ttl_seconds"`
 	// LinkUnlockRequired: the person must type a long-period code in the page to read the details of a login.
 	LinkUnlockRequired bool `json:"link_unlock_required"`
+	// LinkViaAgent: the login link is handed to the agent in the tool result, not sent to DingTalk (switched on, no robot).
+	LinkViaAgent bool `json:"link_via_agent"`
 	// SealingCodeRequired: the person must type a short-period code in the page, and what they type is sealed with it.
 	SealingCodeRequired bool `json:"sealing_code_required"`
 	// DatabaseTargets lists the configured database targets by name, with what an agent may do on each. No hosts.
@@ -63,7 +65,7 @@ func (s *Server) policy() Policy {
 		DDLAllowed: s.cfg.Archery.DDLAllowed(), ArcheryRequestsAllowed: s.cfg.Security.AllowArcheryRequests, AuditEnabled: s.cfg.Audit.On(),
 		HumanTTLSeconds:    int(s.cfg.Web.TTL.Seconds()),
 		LinkUnlockRequired: s.cfg.Security.LinkTOTP.Enabled, SealingCodeRequired: s.cfg.Security.SealTOTP.Enabled,
-		VaultState: s.vault.State().String(),
+		VaultState: s.vault.State().String(), LinkViaAgent: s.linkViaAgent(),
 	}
 }
 

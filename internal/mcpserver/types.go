@@ -54,6 +54,15 @@ type LoginOutput struct {
 	WaitingFor string `json:"waiting_for,omitempty"`
 	Round      int    `json:"round,omitempty"`
 	NextTool   string `json:"next_tool,omitempty"`
+	LinkHandover
+}
+
+// LinkHandover is the part of a pending answer that exists only when the owner lets the login link go to the agent
+// (security.link_via_agent, with no DingTalk robot): the link, the code the page shows, and what to do with them.
+type LinkHandover struct {
+	Link        string `json:"link,omitempty"`
+	KeyCode     string `json:"key_code,omitempty"`
+	Instruction string `json:"instruction,omitempty"`
 }
 
 // RequestInput is what an agent may ask for. There is deliberately no field for a cookie, a token or an
@@ -102,6 +111,7 @@ type VaultUnlockOutput struct {
 	WaitingFor      string `json:"waiting_for,omitempty"`
 	ExpiresAt       string `json:"expires_at,omitempty"`
 	NextTool        string `json:"next_tool,omitempty"`
+	LinkHandover
 }
 
 // VaultStatusOutput says whether the vault is open and, when unlock attempts are being slowed, for how long.
