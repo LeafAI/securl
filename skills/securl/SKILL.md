@@ -28,13 +28,19 @@ You need an outbound `ssh` client (tunnels use it). Then pick the way that fits 
 # macOS / Linux: <os> is darwin or linux, <arch> is arm64 or amd64
 curl -LO https://github.com/LeafAI/securl/releases/download/nightly/securl_<os>_<arch>.tar.gz
 curl -LO https://github.com/LeafAI/securl/releases/download/nightly/SHA256SUMS
+curl -LO https://github.com/LeafAI/securl/releases/download/nightly/SHA256SUMS.sig
+curl -LO https://raw.githubusercontent.com/LeafAI/securl/master/keys/allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I securl-release -n securl-release -s SHA256SUMS.sig < SHA256SUMS   # it must print "Good"
 shasum -a 256 --ignore-missing -c SHA256SUMS      # sha256sum on Linux; it must print OK
 tar -xzf securl_<os>_<arch>.tar.gz
 install -m 0755 securl_*_<os>_<arch>/securl ~/.local/bin/securl
 securl version                                    # nightly-<date>-<commit>
 ```
 
-- Do not skip the check. If it does not print `OK` for your file, delete the download and do not run it.
+- Do not skip the checks. If `ssh-keygen` does not print `Good` or `shasum` does not print `OK` for your file, delete the
+  download and do not run it. The first shows that `SHA256SUMS` was signed by the release key (`keys/securl-release.pub`,
+  fingerprint `SHA256:QSdbV2Da6NA2sJZ7wFj08onoUQ1qJvQO8w+AZAYweQI`); the second that your archive is the one it lists. Take `allowed_signers` from the repository, as above,
+  never from the release: a key that came with the files could be replaced with them.
 - `--ignore-missing` is needed because you downloaded one archive and `SHA256SUMS` lists all of them.
 - Use `uname -sm` to find the platform (`Darwin arm64` is `darwin` and `arm64`, `x86_64` is `amd64`, `aarch64` is `arm64`).
 - Windows gets a `.zip` (`securl_windows_<arch>.zip`): check it with `certutil -hashfile securl_windows_<arch>.zip SHA256`
@@ -83,6 +89,9 @@ Update the way you installed, so that the new binary replaces the old one and is
 ```
 curl -LO https://github.com/LeafAI/securl/releases/download/nightly/securl_<os>_<arch>.tar.gz
 curl -LO https://github.com/LeafAI/securl/releases/download/nightly/SHA256SUMS
+curl -LO https://github.com/LeafAI/securl/releases/download/nightly/SHA256SUMS.sig
+curl -LO https://raw.githubusercontent.com/LeafAI/securl/master/keys/allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I securl-release -n securl-release -s SHA256SUMS.sig < SHA256SUMS   # it must print "Good"
 shasum -a 256 --ignore-missing -c SHA256SUMS      # it must print OK
 tar -xzf securl_<os>_<arch>.tar.gz
 install -m 0755 securl_*_<os>_<arch>/securl ~/.local/bin/securl

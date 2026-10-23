@@ -28,11 +28,24 @@ release, tagged `nightly`, built from `master` and replaced every night when `ma
 # macOS / Linux: <os> is darwin or linux, <arch> is arm64 or amd64
 curl -LO https://github.com/LeafAI/securl/releases/download/nightly/securl_<os>_<arch>.tar.gz
 curl -LO https://github.com/LeafAI/securl/releases/download/nightly/SHA256SUMS
+curl -LO https://github.com/LeafAI/securl/releases/download/nightly/SHA256SUMS.sig
+curl -LO https://raw.githubusercontent.com/LeafAI/securl/master/keys/allowed_signers      # the key comes from the repository, not the release
+ssh-keygen -Y verify -f allowed_signers -I securl-release -n securl-release -s SHA256SUMS.sig < SHA256SUMS   # must print "Good"
 shasum -a 256 --ignore-missing -c SHA256SUMS            # sha256sum on Linux; must print OK
 tar -xzf securl_<os>_<arch>.tar.gz
 install -m 0755 securl_*_<os>_<arch>/securl ~/.local/bin/securl
 securl version                                          # nightly-<date>-<commit>
 ```
+
+**What the signature proves.** `SHA256SUMS` is signed with the release key, whose public half is `keys/securl-release.pub` in this
+repository (ed25519, fingerprint `SHA256:QSdbV2Da6NA2sJZ7wFj08onoUQ1qJvQO8w+AZAYweQI`). The first
+`ssh-keygen` command shows that `SHA256SUMS` is the file the publishers signed, and the `shasum` command then shows that your
+archive is the one it lists. Without the signature, whoever could replace an archive could replace `SHA256SUMS` next to it, and
+the hashes would prove nothing. Take the key from the repository, as above, and not from the release: a key that came with the
+files could be replaced with them. You can compare the fingerprint with `ssh-keygen -lf keys/securl-release.pub`. `ssh-keygen` is
+part of OpenSSH, which macOS and most Linux systems have; Windows 10 and later has it too (`ssh-keygen.exe`). The signature does
+not make macOS or Windows trust the program: Gatekeeper and SmartScreen look for signatures of their own, which the build does
+not have, so the first run may need a confirmation from the system.
 
 Every archive is published twice, as `securl_<version>_<os>_<arch>` and as `securl_<os>_<arch>` (the same file), so the
 command above never goes stale. The release is a pre-release, so GitHub's "latest" link does not point at it: use the
