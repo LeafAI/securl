@@ -15,6 +15,8 @@ on:
       - ".github/workflows/nightly.yml"
       - "scripts/release.sh"
       - "scripts/publish-nightly.sh"
+      - "scripts/sign-release.sh"
+      - "keys/**"
   workflow_dispatch:
 
 permissions:
@@ -84,9 +86,33 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  publish:
+  # The only job that sees the signing key, and the only one that has it: it can write nothing to the repository or to the
+  # release, so a signature cannot be made and published by the same job. The environment lets only `master` read the key.
+  sign:
     if: needs.build.outputs.publish == 'true'
     needs: build
+    runs-on: ubuntu-latest
+    environment: release-signing
+    steps:
+      # The script and the public key are taken from the commit that was built.
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: securl-nightly
+          path: dist
+      - name: Sign SHA256SUMS and check the signature against the published key
+        env:
+          SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: scripts/sign-release.sh dist keys/securl-release.pub
+      - uses: actions/upload-artifact@v4
+        with:
+          name: securl-nightly-signature
+          path: dist/SHA256SUMS.sig
+          if-no-files-found: error
+
+  publish:
+    if: needs.build.outputs.publish == 'true'
+    needs: [build, sign]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -97,11 +123,20 @@ jobs:
         with:
           name: securl-nightly
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: securl-nightly-signature
+          path: dist
       - name: Check again before publishing
         working-directory: dist
         run: |
           sha1sum --check --strict SHA1SUMS
           sha256sum --check --strict SHA256SUMS
+      # The signature is checked here too, with the public key of the commit being published and no private key in sight: the
+      # check a user makes, made by the job that hands the files over.
+      - name: Check the signature the way a user will
+        run: |
+          ssh-keygen -Y verify -f keys/allowed_signers -I securl-release -n securl-release -s dist/SHA256SUMS.sig < dist/SHA256SUMS
       - name: Replace the nightly release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -371,6 +371,8 @@ func TestEveryFieldTheSkillNamesIsOneTheToolsTake(t *testing.T) {
 		"read_only": true, "read_write": true,
 		// Parameters of the sites' own APIs, used as examples of what goes into `query`.
 		"per_page": true,
+		// A file of the repository that the install steps download: the public key of the release.
+		"allowed_signers": true,
 	}
 	skill := readSkill(t)
 	for _, m := range regexp.MustCompile("`([a-z]+(?:_[a-z]+)+)`").FindAllStringSubmatch(skill, -1) {

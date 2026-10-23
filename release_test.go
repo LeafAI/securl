@@ -98,8 +98,14 @@ func TestOnlyAMasterBuildThatTheFirstJobApprovedIsPublished(t *testing.T) {
 	if pub.If != "needs.build.outputs.publish == 'true'" {
 		t.Errorf("publish must run only when build approved it, if: %q", pub.If)
 	}
-	if pub.Needs != "build" {
-		t.Errorf("publish must wait for build, needs: %v", pub.Needs)
+	needs, _ := pub.Needs.([]any)
+	var got []string
+	for _, n := range needs {
+		got = append(got, n.(string))
+	}
+	sort.Strings(got)
+	if strings.Join(got, ",") != "build,sign" {
+		t.Errorf("publish must wait for build and for the signature, needs: %v", pub.Needs)
 	}
 	// What decides: master, and a scheduled or manual run. A pull request must never reach `publish=true`.
 	for _, want := range []string{`"$REF" = "refs/heads/master"`, `"$EVENT" = "schedule"`, `"$EVENT" = "workflow_dispatch"`} {
@@ -142,6 +148,7 @@ func TestANightWithNoNewCommitBuildsNothing(t *testing.T) {
 // The token is read-only everywhere except the one job that replaces the release, so a step that is compromised in a
 // build cannot write to the repository.
 func TestNightlyTokenIsReadOnlyExceptWhereTheReleaseIsReplaced(t *testing.T) {
+	// (the signing job has no `permissions:` of its own: it gets the workflow's read-only token, see the signing tests)
 	w, _ := loadWorkflow(t)
 	if got := w.Permissions["contents"]; got != "read" {
 		t.Errorf("workflow-level contents permission = %q, want read", got)
@@ -151,8 +158,10 @@ func TestNightlyTokenIsReadOnlyExceptWhereTheReleaseIsReplaced(t *testing.T) {
 			t.Errorf("workflow-level permission %s is write", name)
 		}
 	}
-	if got := w.Jobs["build"].Permissions; len(got) != 0 {
-		t.Errorf("the build job must not widen the token: %v", got)
+	for _, job := range []string{"build", "sign"} {
+		if got := w.Jobs[job].Permissions; len(got) != 0 {
+			t.Errorf("the %s job must not widen the token: %v", job, got)
+		}
 	}
 	if got := w.Jobs["publish"].Permissions["contents"]; got != "write" {
 		t.Errorf("publish needs contents: write to replace the release, got %q", got)
@@ -552,6 +561,7 @@ func publishDir(t *testing.T, withSums bool) string {
 	if withSums {
 		os.WriteFile(filepath.Join(dir, "SHA1SUMS"), []byte("x  y\n"), 0o644)
 		os.WriteFile(filepath.Join(dir, "SHA256SUMS"), []byte("x  y\n"), 0o644)
+		os.WriteFile(filepath.Join(dir, "SHA256SUMS.sig"), []byte("-----BEGIN SSH SIGNATURE-----\n"), 0o644)
 	}
 	return dir
 }
@@ -606,7 +616,7 @@ func TestPublishReplacesTheNightlyReleaseInOrder(t *testing.T) {
 }
 
 // The file list is every archive and both checksum files, and nothing else in the directory.
-func TestPublishUploadsEveryArchiveAndBothChecksumFiles(t *testing.T) {
+func TestPublishUploadsEveryArchiveBothChecksumFilesAndTheSignature(t *testing.T) {
 	publishSkip(t)
 	g := newFakeGH(t, false, false, "")
 	dir := publishDir(t, true)
@@ -616,7 +626,7 @@ func TestPublishUploadsEveryArchiveAndBothChecksumFiles(t *testing.T) {
 	}
 	uploaded, _ := os.ReadFile(filepath.Join(g.state, "uploaded"))
 	got := strings.Fields(string(uploaded))
-	want := []string{"SHA1SUMS", "SHA256SUMS", "securl_linux_amd64.tar.gz", "securl_nightly-20261012-1a2b3c4_linux_amd64.tar.gz"}
+	want := []string{"SHA1SUMS", "SHA256SUMS", "SHA256SUMS.sig", "securl_linux_amd64.tar.gz", "securl_nightly-20261012-1a2b3c4_linux_amd64.tar.gz"}
 	sort.Strings(got)
 	sort.Strings(want)
 	if strings.Join(got, "|") != strings.Join(want, "|") {
@@ -691,6 +701,30 @@ func TestPublishChecksItsInputBeforeItDeletesAnything(t *testing.T) {
 
 // A failure while deleting leaves the old release in place and creates nothing; a failure while creating is reported,
 // not hidden, so the next night (or a manual run) can try again.
+// A release whose checksums are not signed is not published, and the old release is left as it is: a nightly that looks
+// signed and is not would be worse than the one from the night before.
+func TestPublishRefusesToReplaceTheReleaseWithoutASignature(t *testing.T) {
+	publishSkip(t)
+	for name, drop := range map[string]string{"missing": "SHA256SUMS.sig", "empty": ""} {
+		dir := publishDir(t, true)
+		if name == "missing" {
+			os.Remove(filepath.Join(dir, drop))
+		} else {
+			os.WriteFile(filepath.Join(dir, "SHA256SUMS.sig"), nil, 0o644)
+		}
+		g := newFakeGH(t, true, true, "")
+		if out, err := g.publish(dir, nightlyCommit, nightlyVersion, "LeafAI/securl"); err == nil {
+			t.Errorf("%s signature: published\n%s", name, out)
+		}
+		if n := len(g.calls()); n != 0 {
+			t.Errorf("%s signature: gh was called %d times (%v) before the refusal", name, n, g.calls())
+		}
+		if !g.has("release") || !g.has("tag") {
+			t.Errorf("%s signature: the existing release was removed", name)
+		}
+	}
+}
+
 func TestPublishStopsAtTheFirstFailure(t *testing.T) {
 	publishSkip(t)
 	g := newFakeGH(t, true, true, "delete")

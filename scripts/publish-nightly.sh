@@ -20,16 +20,19 @@ tag="nightly"
 [[ "$version" =~ ^nightly-[0-9]{8}-[0-9a-f]{7,40}$ ]] || { echo "publish-nightly.sh: bad version '$version'" >&2; exit 2; }
 [[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || { echo "publish-nightly.sh: bad repository '$repo'" >&2; exit 2; }
 [ -d "$dir" ] || { echo "publish-nightly.sh: $dir is not a directory" >&2; exit 2; }
-for need in SHA1SUMS SHA256SUMS; do
+# The signature is part of the release: a release without one would leave users with nothing to check the sums against, and it
+# is better that there is no new nightly than one that looks signed and is not.
+for need in SHA1SUMS SHA256SUMS SHA256SUMS.sig; do
   [ -s "$dir/$need" ] || { echo "publish-nightly.sh: $dir/$need is missing or empty" >&2; exit 2; }
 done
-files=("$dir"/securl_* "$dir"/SHA1SUMS "$dir"/SHA256SUMS)
-[ "${#files[@]}" -ge 3 ] || { echo "publish-nightly.sh: nothing to publish in $dir" >&2; exit 2; }
+files=("$dir"/securl_* "$dir"/SHA1SUMS "$dir"/SHA256SUMS "$dir"/SHA256SUMS.sig)
+[ "${#files[@]}" -ge 4 ] || { echo "publish-nightly.sh: nothing to publish in $dir" >&2; exit 2; }
 command -v gh >/dev/null 2>&1 || { echo "publish-nightly.sh: gh is required" >&2; exit 2; }
 
 notes="Built from commit ${commit} (${version}). This release is replaced every night; the tag \`${tag}\` always points at the latest build.
 
-Check a download against SHA256SUMS (SHA1SUMS is also listed; SHA-1 only catches damage, not tampering)."
+Check a download against SHA256SUMS (SHA1SUMS is also listed; SHA-1 only catches damage, not tampering). SHA256SUMS is signed:
+SHA256SUMS.sig is checked with the public key in the repository (keys/securl-release.pub), see the README."
 
 # gh exits non-zero for "not found", which is fine here; anything else is a failure the next step would hide, so the
 # existence of the old release is asked first.
