@@ -95,6 +95,47 @@ The login API runs on 127.0.0.1 and is exposed through `ssh -R`. Order and extra
 * Every login shows a **key code** on the page and in the DingTalk message. The human must compare them before
   Submit is enabled.
 
+## 4a. From the command line
+
+The tools can be run without an agent: `securl session open --url https://gitlab.corp.example`, `securl db query --target
+gm-dev-pg --sql "select 1"`. See README, "From the command line", for the flags and exit codes.
+
+- The first command in a terminal asks for the vault passphrase (no echo) and locks the vault again when it ends. Nothing
+  keeps it open between commands, so each command asks; a session that one command opened is kept in the vault for the next.
+- In a script, with no terminal, a command never reads the passphrase from standard input, an argument or the environment:
+  that would put it in a shell history or a process listing, which the vault is built to avoid. It sends the person the usual
+  link instead. For unattended use, keep a long-running `securl` MCP server that someone has unlocked, and let the agents use that.
+- A link for the person goes to standard error (with `security.link_via_agent`), the answer to standard output: pipe the
+  answer into `jq` and the link still reaches the terminal.
+
+### The daemon
+
+`securl daemon` keeps one server running, with its vault, so that the commands of section 4a share it. Run it in a terminal
+you leave open, under `tmux`, or from your login items: it needs no terminal of its own.
+
+```
+securl daemon                       # starts locked; logs to standard error
+securl daemon status                # running or not, and whether its vault is open
+securl unlock                       # open its vault now: you are sent a link and type the passphrase on its page
+securl session open --url ...       # or: the first command that needs the vault asks you, by link, to unlock it
+securl --no-daemon site list        # run one command alone, even with a daemon running
+```
+
+- It listens on a Unix socket: `$XDG_RUNTIME_DIR/securl/d.sock`, or `/tmp/securl-<uid>/d.sock` where there is none
+  (`daemon.socket` sets it; a path over about 100 bytes is refused). The file is `0600` and its directory must be yours and
+  not writable by others; the daemon checks the user on the other end of every connection.
+- **Set `vault.idle_lock`** (`securl config set vault.idle_lock 30m`). An unlocked daemon lets every process of your user use
+  your sessions, until it locks. With the default (never) it stays open until you stop it.
+- A locked daemon is opened by link, like an agent's server, from a terminal or not: the passphrase is never typed into a
+  command and sent over the socket. So the DingTalk robot (or `security.link_via_agent`) is needed to unlock a daemon.
+  `securl unlock` asks for exactly that and waits (exit 0 open, 3 no daemon, 4 nobody answered). There is no `securl lock`
+  either: stopping the daemon (or `vault.idle_lock`) locks it, and a command that could lock it would let anything that reaches
+  the socket take away the vault someone has just opened.
+- One daemon per socket: a second `securl daemon` refuses to start. A socket left by a daemon that crashed is replaced.
+- Stop it with Ctrl-C or `SIGTERM`: it locks the vault and removes the socket. A command that is talking to it when it stops
+  ends with an error and is not run again by itself, since it may already have done what it was asked.
+- Not available on Windows, nor on systems that cannot report who is on the other end of a socket: commands run alone there.
+
 ## 5. Configure each site
 
 Use `securl doctor -site <url>` for every site before the first login. It needs no credentials, applies your

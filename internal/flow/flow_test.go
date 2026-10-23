@@ -1603,3 +1603,111 @@ func TestALinkIsClaimedOnceAndAgainWhenItChanges(t *testing.T) {
 		t.Error("a replacement link is fresh")
 	}
 }
+
+// ---- Drain ----
+
+// readStatus is the page polling the outcome of its round.
+func readStatus(t *testing.T, f *Flow) {
+	t.Helper()
+	url := fmt.Sprintf("http://127.0.0.1:%d/%s/status", f.port, f.cur.Token)
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+}
+
+func drainManager(cap, flush time.Duration) *Manager {
+	return NewManager(Config{Keys: keyring.NewMemoryPool(8, time.Hour), Notifier: okNotifier{}, Tunnels: fakeTunnels{},
+		PageURL: "https://page.example/", TTL: time.Minute, OutcomeCap: cap, FlushDelay: flush})
+}
+
+// endedFlow runs a login that brings its round up and then ends as a success, as if the person had answered: the state in
+// which a command-line process is about to exit while the page still has to read the outcome.
+func endedFlow(t *testing.T, m *Manager) *Flow {
+	t.Helper()
+	u, _ := url.Parse("https://site.example")
+	f := m.Start(afterRoundDriver{}, u, "r", http.DefaultClient, nil)
+	select {
+	case <-f.Done():
+	case <-time.After(waitLimit):
+		t.Fatal("the flow did not end")
+	}
+	return f
+}
+
+func TestDrainReturnsOnceThePageHasReadTheOutcomeAndTheTunnelIsClosed(t *testing.T) {
+	m := drainManager(time.Hour, 50*time.Millisecond)
+	f := endedFlow(t, m)
+	select {
+	case <-f.closed:
+		t.Fatal("the tunnel is closed before the page has read the outcome")
+	default:
+	}
+	done := make(chan time.Duration, 1)
+	start := time.Now()
+	go func() { m.Drain(30 * time.Second); done <- time.Since(start) }()
+	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-done:
+		t.Fatal("Drain returned while the page had not read the outcome")
+	default:
+	}
+	readStatus(t, f)
+	select {
+	case took := <-done:
+		if took > 10*time.Second {
+			t.Errorf("Drain took %s after the page read the outcome", took)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Drain did not return after the page read the outcome")
+	}
+	select {
+	case <-f.closed:
+	default:
+		t.Error("the tunnel must be closed when Drain returns")
+	}
+}
+
+func TestDrainEndsAtTheOutcomeCapWhenNobodyReadsIt(t *testing.T) {
+	m := drainManager(300*time.Millisecond, time.Hour)
+	endedFlow(t, m)
+	start := time.Now()
+	m.Drain(30 * time.Second)
+	if took := time.Since(start); took < 250*time.Millisecond || took > 5*time.Second {
+		t.Errorf("Drain took %s, the cap is 300ms", took)
+	}
+}
+
+func TestDrainGivesUpAtItsOwnLimit(t *testing.T) {
+	m := drainManager(time.Hour, time.Hour)
+	endedFlow(t, m)
+	start := time.Now()
+	m.Drain(300 * time.Millisecond)
+	if took := time.Since(start); took < 250*time.Millisecond || took > 3*time.Second {
+		t.Errorf("Drain with a 300ms limit took %s", took)
+	}
+	m.Close()
+}
+
+func TestDrainWithNothingRunningReturnsAtOnce(t *testing.T) {
+	m := drainManager(time.Hour, time.Hour)
+	start := time.Now()
+	m.Drain(30 * time.Second)
+	if time.Since(start) > 500*time.Millisecond {
+		t.Errorf("took %s", time.Since(start))
+	}
+}
+
+func TestDrainDoesNotWaitForAFlowThatIsStillWaitingForAPerson(t *testing.T) {
+	m := drainManager(time.Hour, time.Hour)
+	u, _ := url.Parse("https://site.example")
+	f := m.Start(stubDriver{}, u, "r", http.DefaultClient, nil)
+	waitFor(t, "the round to wait", func() bool { return f.Snapshot().Phase == "waiting_human" })
+	start := time.Now()
+	m.Drain(30 * time.Second)
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("Drain waited for a person: that is Close's job, took %s", time.Since(start))
+	}
+	m.Close()
+}

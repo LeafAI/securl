@@ -258,6 +258,53 @@ Every tool has a title and an output schema. Read-only resources: `securl://site
 Long operations return a `pending` result with an id after `max_block_seconds`; resume with `session_wait` /
 `archery_wait`.
 
+## From the command line
+
+Every tool is also a command, for a person at a terminal or a script: `securl <group> <command> --flag value`. The command
+runs the same server in its own process and talks to it like any MCP client does, so it has the same checks, limits, request
+policies and audit trail as an agent, and its answer never carries a credential.
+
+```
+securl session open --url https://gitlab.corp.example --reason "list merge requests"
+securl request --url https://gitlab.corp.example --method GET --path /api/v4/user
+securl db query --target gm-dev-pg --sql @query.sql
+securl archery run-sql --url https://archery.corp.example --instance x --database y --title t --sql - < change.sql
+```
+
+- A tool `group_name` is `securl group name` (`archery_run_sql` is `securl archery run-sql`); a tool with no group is one
+  word (`securl request`). A field is a flag with its dashes (`max_block_seconds` is `--max-block-seconds`); `--help` lists
+  them, with the tool's own description. The flags are read from the tool's input schema, so a field added to a tool is a flag
+  from the next build on. A map is given as repeated `--header name=value`; JSON as `--json '{...}'`; a text value may be
+  `-` (standard input) or `@file`; `@@x` is the text `@x`.
+- **The answer is one JSON document on standard output; everything else (prompts, progress, a link for the person) is on
+  standard error.** Exit codes: `0` answered, `1` the tool answered with an error (its JSON is the output), `2` the command
+  line was wrong and nothing ran, `3` the configuration or the vault could not be set up, `4` still waiting for a person
+  (the answer says how to continue: `securl session wait --login-id ...`).
+- **The vault.** Each command is its own process, so it opens the vault for itself and locks it again when it ends; a session
+  one command opened is in the vault for the next. On a terminal it asks for the passphrase (no echo). With no terminal (a
+  pipe, a script, an agent's shell) it never reads the passphrase from anywhere: not from standard input, an argument or an
+  environment variable. It opens the vault the way an agent does, with a link for the person (DingTalk, or on standard error
+  with `security.link_via_agent`). `securl vault status`, `securl vault init` and `securl vault passwd` are unchanged.
+- `securl` with no arguments, or with only flags (`securl -config file`), is still the MCP server on standard input and
+  output, exactly as an MCP client's configuration starts it; `securl serve` is the same server by name. An unknown word is
+  an error, not a server that waits for input.
+- **A daemon.** `securl daemon` runs one server in the background of your session; commands then talk to it instead of each
+  starting their own, so the vault is unlocked once and the session of one command is there for the next without a passphrase
+  each time. `securl daemon status` says whether one is running and whether its vault is open. Commands use a running daemon by
+  themselves (and say so on standard error when there is none and they run alone); `--no-daemon` makes a command run alone.
+  The daemon starts locked and is opened the way an agent opens a server: the first command that needs the vault sends you the
+  link, and you type the passphrase on its page. `securl unlock` does only that: it asks the running daemon to open its vault,
+  waits for you, and exits 0 when it is open (4 if nobody answered in time, 3 if there is no daemon). **The passphrase never
+  goes over the socket**, and `securl unlock` does not ask for it on the terminal either: it would have to travel over a socket
+  that every process of your user can reach, an agent's shell among them. Without a robot, set `security.link_via_agent` and the
+  link is printed on the terminal.
+  **What this changes:** while the daemon is unlocked, every process of your user can use its sessions through the tools
+  (never a credential). The socket is `0600` in a directory only you can write, the peer's user is checked on every connection,
+  and the vault locks again after `vault.idle_lock` (set it: the default is to stay open). It is not available on Windows.
+  See `DESIGN.md`, "Threat model".
+- Two tools have no command: `vault_unlock` (a command opens the vault for itself) and `vault_status` (`securl vault status`
+  already exists).
+
 ## Adding a website
 
 Describe it in YAML (`sites:` above), or write a Go driver: implement `site.Driver` in

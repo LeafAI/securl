@@ -4,7 +4,11 @@
 //
 // Usage:
 //
-//	securl [-config file]        serve MCP over stdio
+//	securl [-config file]        serve MCP over stdio (no arguments: this is what an MCP client starts)
+//	securl serve [-config file]  the same, by name
+//	securl unlock                ask the person to open the vault of the running daemon (by link: no passphrase is typed here)
+//	securl daemon [-config file] the long-running process the commands below talk to (securl daemon status: is it running)
+//	securl <group> <command> ... run one tool from the command line (securl session open --url ...; see securl help)
 //	securl version               print the version
 //	securl page [dir]            write the static login page (to open locally instead of GitHub Pages)
 //	securl doctor [-tunnel] [-send]  check the setup, try the tunnel providers, send a test DingTalk message
@@ -20,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -70,8 +75,26 @@ func main() {
 		os.Exit(runVault(os.Args[2:]))
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "unlock" {
+		os.Exit(runUnlock(os.Args[2:]))
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "daemon" {
+		os.Exit(runDaemon(os.Args[2:]))
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
 		os.Exit(runDoctor(os.Args[2:]))
+	}
+
+	// With no arguments, or with only flags (securl -config file), this is the MCP server on stdio, exactly as before. A
+	// word is a command: `securl serve` is the same server by name, and every tool is a command of its own.
+	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
+		if os.Args[1] == "serve" {
+			os.Args = append(os.Args[:1], os.Args[2:]...)
+		} else {
+			os.Exit(runTool(os.Args[1:]))
+		}
 	}
 
 	cfgPath := flag.String("config", config.DefaultPath(), "config file")

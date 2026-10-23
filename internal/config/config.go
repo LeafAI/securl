@@ -41,6 +41,14 @@ type Config struct {
 	Sites []generic.Spec `yaml:"sites"`
 	// Databases lists the PostgreSQL and MySQL databases an agent may run SQL against (non-production only).
 	Databases []Database `yaml:"databases"`
+	Daemon    Daemon     `yaml:"daemon"`
+}
+
+// Daemon configures `securl daemon`, the long-running process the command-line commands talk to.
+type Daemon struct {
+	// Socket is the Unix socket the daemon listens on and the commands connect to. The default is "securl.sock" in the
+	// user's runtime directory, or in a private directory under the temporary one; the file is made for the owner alone.
+	Socket string `yaml:"socket"`
 }
 
 // Vault configures the encrypted store that holds every secret login keeps (logged-in sessions, TOTP secrets). It is

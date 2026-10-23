@@ -204,6 +204,9 @@ func TestUnknownCommandsAndUsage(t *testing.T) {
 	if !strings.Contains(r.err.String(), "vault_unlock") && !strings.Contains(r.err.String(), "DingTalk") {
 		t.Errorf("a person who types `securl vault unlock` must be told how a running server is opened: %q", r.err.String())
 	}
+	if !strings.Contains(r.err.String(), "securl unlock") {
+		t.Errorf("and that `securl unlock` opens the vault of a running daemon: %q", r.err.String())
+	}
 }
 
 func TestNoInputIsAnErrorNotAHang(t *testing.T) {
