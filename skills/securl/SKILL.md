@@ -91,6 +91,58 @@ The binary is `$(go env GOPATH)/bin/securl` (or `$GOBIN`); make sure that direct
 github.com/LeafAI/securl@<commit>`. If it answers `no matching versions` right after a push, the module proxy has not seen
 the new commit yet: run it again in a minute, or use `GOPROXY=direct`.
 
+### 1c. Linux packages (DEB / RPM)
+
+For Debian/Ubuntu or Amazon Linux 2023, use `make deb` / `make rpm` from a trusted checkout of this repository.
+These packages are **not published** by the nightly workflow. Building needs Git, Make and Go 1.21 or newer (with toolchain
+download enabled); installing a finished package needs neither Go nor a build. `make` only builds, never installs.
+Use the package manager for the target platform:
+
+```bash
+# Debian/Ubuntu: dpkg-deb is supplied by dpkg-dev; Docker can do the package assembly instead.
+sudo apt install dpkg-dev
+make deb VERSION=0.1.0 DEB_ARCH=amd64
+sudo apt install ./dist/securl_0.1.0_amd64.deb
+
+# Amazon Linux 2023:
+sudo dnf install rpm-build
+make rpm VERSION=0.1.0 RPM_ARCH=x86_64
+sudo dnf install ./dist/securl-0.1.0-1.x86_64.rpm
+```
+
+Use `DEB_ARCH=arm64` / `RPM_ARCH=aarch64` for ARM64 or Graviton; RPM also accepts `amd64` / `arm64`.
+`DIST` overrides the output directory and `RPM_RELEASE=2` bumps the RPM revision. The default version is
+`0.1.0~git.<date>.<commit>` and the default architecture comes from `go env GOARCH`. Do not invent release URLs or
+claim these locally built packages have the nightly release signature. Only run an installation with the user's
+permission; do not change privileges, initialize a vault or enable lingering just to probe a deployment.
+
+The packages install `/usr/bin/securl` and a **user-level** systemd unit. They start/restart daemons for active non-root
+users with a session bus, and enable them for future logins. They do not set up credentials or unlock anything.
+A fresh account reports `not_initialized`: ask the user to do section 3 in their own terminal, including `securl vault init`
+and `securl config init`. After first-time setup or deliberate config changes, restart with
+`systemctl --user restart securl` and use `securl unlock`. Existing vaults start locked; user data is preserved.
+
+Run service diagnostics as the vault owner, **without sudo**:
+
+```bash
+systemctl --user status securl --no-pager
+journalctl --user -u securl -n 50 --no-pager
+securl daemon status
+```
+
+- `sudo systemctl status securl` looks for a system unit, which these packages do not install. `sudo systemctl --user`
+  targets root, often failing with "No medium found". Use the person's own login session; if its user bus is missing,
+  inspect `XDG_RUNTIME_DIR` and the user manager. Never borrow another user's socket or start the daemon as root.
+- If the installer says "systemd is not running", it installed only the binary; users without a session bus also wait
+  until login. With systemd, use `systemctl --user start securl` in that user's session; without it, a user-authorized
+  supervisor can run `securl daemon`. `securl daemon install` / `uninstall` remain macOS-only.
+- Stop only when asked: `systemctl --user stop securl`. Upgrade by installing a rebuilt package with a higher
+  version/release; active daemons restart and lock, and pending human flows can be interrupted. To uninstall, use
+  `sudo apt remove securl` / `sudo dnf remove securl`. Package files and service are removed, but user data is retained.
+- Set a bounded `vault.idle_lock` (for example `30m`) with the user's approval; the default stays open until shutdown.
+  Configuration is read at startup, so a changed setting needs an intentional daemon restart. Boot without login
+  needs an administrator-approved lingering policy; the package does not change that policy.
+
 ### Both ways
 
 - Make sure the directory the binary went into is on `PATH`, and that it is the only copy: if `securl version` is not what
@@ -109,6 +161,33 @@ claude mcp add securl -- securl
 ```
 
 For any other client, add a stdio server whose command is `securl`. To use another config file, pass `-config <file>`.
+For a Linux package, an absolute path avoids an older Go/archive copy earlier on `PATH`:
+
+```json
+{
+  "mcpServers": {
+    "securl": { "command": "/usr/bin/securl", "args": [] }
+  }
+}
+```
+
+**MCP is not the CLI daemon.** `securl` / `securl serve` starts its own stdio MCP server and does not attach to the
+CLI daemon. Keep that process/connection alive for the whole vault-unlock, site-login and tool-call workflow.
+Unlocking one does not unlock the other.
+
+For contexts, check `contexts server list` first, then add only if absent:
+
+```bash
+contexts server add securl -- /usr/bin/securl
+contexts status
+contexts exec securl site_list '{}'
+```
+
+`contexts exec` creates a fresh connection and starts a fresh securl process for this stdio entry each time. It closes
+that server when done, including pending login tunnels. Do not call `vault_unlock` through one `exec` and expect the
+next `exec` to retain its unlocked vault or pending login. For stateful operations use a persistent contexts
+gateway/client connection, or use the CLI against its daemon. Inspect JSON `isError`, not just the contexts exit code;
+a tool failure can exit 0. Never bypass a gateway's authorization or tool-deny policy by switching to direct `exec`.
 
 Docker is another alternative: see the README ("Docker"). It keeps config and the vault in a volume.
 
@@ -134,6 +213,10 @@ securl version                                    # the new nightly-<date>-<comm
   securl_macos.pkg -target /`). It replaces `/usr/local/bin/securl` and **restarts the running daemon** with the new binary, which
   starts **locked**: `securl unlock` sends the user a link. Sessions are in the vault, so logins survive. Then
   `securl daemon status` must say `running` with the new version; if it does not, see "Check that it worked" above.
+- **Linux package (1c):** rebuild from the intended source with a higher `VERSION` (or higher `RPM_RELEASE` for the
+  same RPM version), then use `sudo apt install ./dist/<package>.deb` / `sudo dnf install ./dist/<package>.rpm`.
+  The package restarts active user daemons, which start locked again; pending login flows are interrupted. Check
+  `systemctl --user status securl --no-pager` and `securl daemon status` without sudo. It does not overwrite user data.
 - **Go (1b):** run `go install github.com/LeafAI/securl@latest` again. It does not change `securl version` (`0.1.0`), so to
   know it moved, look at the build: in `go version -m $(command -v securl)` the `mod` line ends with the commit it was
   built from (`v0.0.0-<time>-<commit>`).
@@ -385,13 +468,30 @@ is there for the next. `securl daemon status` says whether one runs. Commands us
 - Do not start a daemon on your own, and do not run `securl daemon install`: on a Mac it writes `/Library/LaunchAgents` and needs
   root, which is the user's to give. A daemon keeps the user's vault open for every process of their account, you included. If the
   user wants one and the package was not used, tell them to run `securl daemon`, or `sudo securl daemon install` to have launchd run
-  one for every user at login, and to set `vault.idle_lock` first.
+  one for every user at login, and to set `vault.idle_lock` first. On Linux with a DEB/RPM installation, use the user-level
+  systemd unit from section 1c instead; do not use the macOS installer commands.
 
 ### Archery SQL
 
 On the command line these are `securl archery instances|groups|query|run-sql|wait|workflow-status|cancel`. With no Archery
 session the command waits for the person's login (a link), then prints **its own answer**, not the login's; exit `0` means the
 answer is real. A command that answers `pending` and exits `4` is waiting for an approval: continue with `securl archery wait`.
+
+For metadata-only discovery with a running CLI daemon:
+
+```bash
+securl daemon status
+securl unlock
+securl session list
+securl archery instances --url https://archery.corp.example
+securl archery instances --url https://archery.corp.example --instance '<instance>'
+```
+
+Replace the example URL and `<instance>` with the actual URL and an instance returned by the first call. Angle-bracket
+placeholders are not literal shell syntax. The second instance call lists its databases; do not assume database names
+match instance names. Reuse an existing valid site session; if none exists, the Archery command asks the person to log
+in by link, then returns the requested list. Do not run SQL or submit a workflow merely to list databases. Direct
+non-production targets are a different list, returned by `securl db targets`.
 
 `archery_instances` and `archery_groups` list what the user may use. `archery_query` runs one read-only statement with no
 approval (`url`, `instance`, `database`, `sql`; `limit` caps the rows). To change data, `archery_run_sql` submits a

@@ -96,11 +96,119 @@ SHA-256 against tampering, because SHA-1 collisions can be made. Windows gets a 
 because you downloaded one archive and the file lists all of them. The nightly is a build of the newest `master`, not a
 tested release.
 
+## Linux packages (DEB / RPM)
+
+For Debian/Ubuntu or Amazon Linux 2023, build a native installer from a trusted checkout of this repository.
+The `.deb` and `.rpm` files are **not published** by the nightly workflow; do not substitute guessed download URLs for
+these commands. Building needs Git, Make and Go 1.21 or newer (Go downloads the required toolchain). Installing the
+result on another machine does not need Go. `make deb` and `make rpm` only build; they never install or start a service.
+
+```bash
+# Debian/Ubuntu: dpkg-deb comes from dpkg-dev; Docker is an alternative for sealing the package.
+sudo apt install dpkg-dev
+make deb VERSION=0.1.0 DEB_ARCH=amd64
+sudo apt install ./dist/securl_0.1.0_amd64.deb
+
+# Amazon Linux 2023: build with native RPM tools.
+sudo dnf install rpm-build
+make rpm VERSION=0.1.0 RPM_ARCH=x86_64
+sudo dnf install ./dist/securl-0.1.0-1.x86_64.rpm
+```
+
+Run the appropriate pair from the repository root. For ARM64, use `DEB_ARCH=arm64` or `RPM_ARCH=aarch64` (Graviton).
+RPM also accepts Go's `amd64` / `arm64` names. `DIST` changes the output directory; `RPM_RELEASE=2` changes the RPM
+revision without changing the application version. Without `VERSION`, the Makefile uses `0.1.0~git.<date>.<commit>`;
+without an architecture, it uses `go env GOARCH`. Rebuild with a higher version/release and install with `apt` / `dnf`
+again to upgrade. Local packages are not release-signed artifacts: trust the source/build origin before installing.
+
+Both packages install `/usr/bin/securl` and a **user-level** systemd unit, not a root/system service. They start or
+restart it for active non-root users with a session bus, and enable it for future user logins. An existing vault starts
+locked; a fresh account reports `not_initialized`. Packages never create a passphrase or overwrite configuration.
+The user must perform first-time setup in their own terminal, **without sudo**:
+
+```bash
+# Only if this account has not already been set up:
+securl vault init
+securl config init
+securl config set vault.idle_lock 30m
+securl doctor
+
+# After setup/config changes, or when intentionally restarting the daemon:
+systemctl --user restart securl
+securl daemon status
+securl unlock
+```
+
+The interactive setup is described below under "First run"; do not repeat it for an existing installation. A daemon
+loads its configuration at startup, so changes require an intentional restart, which locks the vault again. Unlock
+only on the page sent by DingTalk (or the configured agent-delivered link), never by putting a password in a command.
+
+### Linux service status and troubleshooting
+
+Run these as the same ordinary user that owns the vault, **without sudo**:
+
+```bash
+systemctl --user status securl --no-pager
+journalctl --user -u securl -n 50 --no-pager
+securl daemon status
+# Optional: stop only when you intend to stop the service.
+systemctl --user stop securl
+# Start again when wanted: systemctl --user start securl
+```
+
+- `sudo systemctl status securl` looks for a system service, so "Unit securl.service could not be found" is expected.
+  `sudo systemctl --user` instead addresses root's session and can fail with "No medium found". Use your own login session;
+  if the non-sudo command also has no bus, log in normally and check `XDG_RUNTIME_DIR` and the user manager. Do not point
+  it at another user's socket or run the daemon as root.
+- If the installer says "systemd is not running" (such as in a minimal container), only the binary is installed; a user
+  with no active session bus will not be started immediately either. With systemd, log in and use `systemctl --user start
+  securl`. Without it, run `securl daemon` under your own session supervisor. `securl daemon install` / `uninstall` are
+  macOS-only, not Linux systemd commands. Boot without login requires an administrator-approved lingering policy; the
+  package does not change that policy.
+- `command -v securl` can reveal an older Go/archive copy earlier on `PATH`. The packaged service always uses
+  `/usr/bin/securl`; compare `/usr/bin/securl version` with `securl daemon status` before diagnosing a version mismatch.
+- Upgrade restarts active user daemons, relocking their vaults and interrupting pending login flows. To uninstall, use
+  `sudo apt remove securl` or `sudo dnf remove securl`; the service is stopped and package files removed, but **user data**
+  (configuration, vault, sessions and audit log) remains. Even a Debian purge does not erase a user's home directory.
+
+## Connect an MCP client
+
 Then register it with your MCP client:
 
 ```
 claude mcp add securl -- securl          # or add "securl" to any MCP client's server list
 ```
+
+For clients that accept a JSON server configuration (use the actual binary path for a Go/archive install):
+
+```json
+{
+  "mcpServers": {
+    "securl": { "command": "/usr/bin/securl", "args": [] }
+  }
+}
+```
+
+`securl` / `securl serve` is a stdio MCP server: the client must keep its process and transport open for the whole
+workflow. It does not attach to the **CLI daemon**; unlocking that daemon does not unlock a separately launched MCP
+server. On a single persistent MCP connection, call `vault_status`, `vault_unlock` when locked, `session_list`, then
+`session_open` / `session_wait` only when needed, followed by the requested tool. If an unlock returns `pending`, resume
+with `vault_unlock` and its returned `login_id` as `unlock_id`; do not create a new server process between these calls.
+
+With contexts installed, first inspect `contexts server list`; add only when the name is absent:
+
+```bash
+contexts server add securl -- /usr/bin/securl
+contexts status
+# A stateless discovery call, not an unlock workflow:
+contexts exec securl site_list '{}'
+```
+
+**`contexts exec` creates a fresh connection and, for this stdio entry, a fresh securl process on every call.** When it
+exits the MCP server closes, including pending login tunnels; calling `vault_unlock` and then another tool through
+separate `exec` commands will not share an unlocked vault. Use a persistent contexts gateway/client connection for MCP
+workflows, or use securl's CLI against its running daemon. Also inspect the MCP JSON `isError` field: contexts may exit
+0 even when the tool failed. securl CLI commands instead return nonzero exit codes for errors (see below).
 
 An agent skill that teaches install, update, setup and use is in [`skills/securl/SKILL.md`](skills/securl/SKILL.md). Copy
 the `skills/securl` directory into your client's skills directory (for Claude Code: `~/.claude/skills/securl/`).
@@ -117,7 +225,8 @@ the `skills/securl` directory into your client's skills directory (for Claude Co
    posts it to the API. The human can instead press **Reject** and give an optional reason — the agent receives
    `user_rejected` with that reason.
 5. `login` decrypts it and runs the site's real login flow. If the site wants a second factor, the driver
-   starts another round (a new link in DingTalk). The cookie/token is returned to the agent.
+   starts another round (a new link in DingTalk). securl keeps the cookie/token internally; the agent receives only the
+   session result, never the credential.
 
 The static page is served by GitHub Pages (version-pinned) or from your disk (`securl page [dir]`); the tunnel
 carries only ciphertext. See `DESIGN.md` (architecture, threat model) and `MCP_TOOLS.md` (tool schemas).
@@ -342,7 +451,7 @@ securl archery run-sql --url https://archery.corp.example --instance x --databas
   standard error.** Exit codes: `0` answered, `1` the tool answered with an error (its JSON is the output), `2` the command
   line was wrong and nothing ran, `3` the configuration or the vault could not be set up, `4` still waiting for a person
   (the answer says how to continue: `securl session wait --login-id ...`).
-- **The vault.** Each command is its own process, so it opens the vault for itself and locks it again when it ends; a session
+- **The vault without a daemon.** Each standalone command opens the vault for itself and locks it again when it ends; a session
   one command opened is in the vault for the next. On a terminal it asks for the passphrase (no echo). With no terminal (a
   pipe, a script, an agent's shell) it never reads the passphrase from anywhere: not from standard input, an argument or an
   environment variable. It opens the vault the way an agent does, with a link for the person (DingTalk, or on standard error
@@ -350,8 +459,8 @@ securl archery run-sql --url https://archery.corp.example --instance x --databas
 - `securl` with no arguments, or with only flags (`securl -config file`), is still the MCP server on standard input and
   output, exactly as an MCP client's configuration starts it; `securl serve` is the same server by name. An unknown word is
   an error, not a server that waits for input.
-- **A daemon.** `securl daemon` runs one server in the background of your session; commands then talk to it instead of each
-  starting their own, so the vault is unlocked once and the session of one command is there for the next without a passphrase
+- **A daemon.** `securl daemon` runs one long-lived server in the foreground; a session supervisor such as the packaged
+  user-level systemd unit manages it in the background. CLI commands then talk to it instead of each starting their own, so the vault is unlocked once and the session of one command is there for the next without a passphrase
   each time. `securl daemon status` says whether one is running and whether its vault is open. Commands use a running daemon by
   themselves (and say so on standard error when there is none and they run alone); `--no-daemon` makes a command run alone.
   The daemon starts locked and is opened the way an agent opens a server: the first command that needs the vault sends you the
@@ -366,6 +475,25 @@ securl archery run-sql --url https://archery.corp.example --instance x --databas
   See `DESIGN.md`, "Threat model".
 - Two tools have no command: `vault_unlock` (a command opens the vault for itself) and `vault_status` (`securl vault status`
   already exists).
+
+### Read-only Archery walkthrough (CLI)
+
+With the CLI daemon running and the account already initialized, run as the vault owner:
+
+```bash
+securl daemon status
+securl unlock
+securl session list
+securl archery instances --url https://archery.corp.example
+securl archery instances --url https://archery.corp.example --instance '<instance>'
+```
+
+Replace the example URL and `<instance>` with values from your deployment and the first instance list; the angle-bracket
+placeholder is not literal shell syntax. The first call lists permitted instances; the second returns databases for
+that instance. If no site session exists, Archery tools ask the person to log in by link, then return the requested
+result. These commands list metadata only: they do not execute SQL or create change workflows. Reuse valid sessions;
+never run `session close` as cleanup after a query. For direct non-production database targets, `securl db targets`
+lists configured targets instead; it is not the Archery instance list.
 
 ## Adding a website
 
