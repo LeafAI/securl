@@ -106,7 +106,7 @@ func runDoctor(args []string) int {
 	}
 	if *doSend {
 		d := &notify.DingTalk{Webhook: cfg.DingTalk.Webhook, Secret: cfg.DingTalk.Secret, Keyword: cfg.DingTalk.Keyword, Mobiles: cfg.DingTalk.Mobiles}
-		err := d.Markdown(ctx, "securl doctor", "### securl doctor\n\nThis is a test message from `securl doctor`. No action needed.")
+		err := notify.WithLocalOrigin(d).Markdown(ctx, "securl doctor", "### securl doctor\n\nThis is a test message from `securl doctor`. No action needed.")
 		if err != nil {
 			report(false, "dingtalk test message", err.Error())
 		} else {

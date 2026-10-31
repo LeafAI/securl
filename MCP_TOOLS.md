@@ -51,7 +51,7 @@ take minutes. So every blocking tool:
 
 **Result shape.** Success and pending are normal results (`isError: false`) with `structuredContent`
 matching the output schema plus a short text summary. Failures are `isError: true` with
-`structuredContent` = `Error` (below). Secret values appear only in `session_open`/`session_wait` output.
+`structuredContent` = `Error` (below). No result carries passwords, session cookies, bearer tokens or vault passphrases.
 
 ```jsonc
 // Error
@@ -149,6 +149,15 @@ Output (`oneOf` by `status`)
   "next_tool":"session_wait",
   "link":"https://...#...", "key_code":"8885 4F38 DA77 58C0", "instruction":"..." }   // only with link_via_agent, see below
 ```
+**Request origin.** Pending `session_open` / `session_wait`, `vault_unlock` and `session_close` answers include
+`"origin":{"hostname":"build-worker-1","user":"alice","pid":1234,"os":"linux","arch":"amd64"}`.
+This is collected from the serving securl process (the daemon for CLI calls), not from input, the destination site or
+the agent client's identity. Strings are normalized and limited to 128 characters; unavailable host/account values are
+`unknown` with a diagnostic warning. It contains no IP discovery, credential, environment dump, path or machine ID.
+The origin is returned for both delivery routes, including pending results before a link is ready; it does not expose
+a DingTalk-only link. Successful/cached results do not acquire this pending-only field. The agent-delivery `instruction`
+requires showing the origin with the link and key code. It is descriptive metadata, not authenticated host identity.
+
 **When the link goes to the agent.** With no DingTalk webhook configured and `security.link_via_agent: true`, a `pending`
 answer carries the link of the page (`link`), the code the page shows (`key_code`) and a written `instruction`, and
 nothing is sent to DingTalk. The agent shows the link to the user as it is; the user opens it, compares the key code and types
@@ -441,8 +450,15 @@ account can read. The boundary is the account a person types: give it only what 
 | Tool | DingTalk message |
 |---|---|
 | `session_open` / `session_wait` | one per round: site, `reason`, round link, key fingerprint, expiry |
+| `vault_unlock` | vault-unlock link and page key code when human action is needed |
+| `session_close` | confirmation link naming the saved sessions to forget; nothing closes before confirmation |
 | `archery_run_sql` | one after submit: title, instance/db, SQL summary (first 500 chars), Archery workflow link — to the same robot (approval itself happens in Archery) |
-| others | none |
+| `db_exec` | database-change/rollback notification when the change runs |
+| others | none unless they first need a site login |
+
+All DingTalk messages also carry the securl origin hostname in their title and host/account/PID/OS/architecture in a
+body footer, including setup/doctor test messages. Target/link/expiry/key-code text is preserved. Origin is exposed to
+the configured robot's recipients and to agents receiving pending results; choose recipients accordingly.
 
 ## 13. Notes
 

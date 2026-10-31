@@ -73,7 +73,7 @@ func newCloser(s *Server, c *core, unlock, seal flow.CodeSource) *closer {
 	cl := &closer{s: s, c: c, base: base, reqs: map[string]*closeReq{}}
 	cfg := flow.Config{
 		Keys:     keyring.NewMemoryPool(s.cfg.Keys.MaxUses, s.cfg.Keys.MaxAge),
-		Notifier: s.notify, LinkViaAgent: s.linkViaAgent(), Tunnels: s.tunnels, PageURL: s.cfg.Web.PageURL, TTL: s.cfg.Web.TTL, Log: s.log,
+		Notifier: s.notify, Origin: s.origin, LinkViaAgent: s.linkViaAgent(), Tunnels: s.tunnels, PageURL: s.cfg.Web.PageURL, TTL: s.cfg.Web.TTL, Log: s.log,
 		Admit: func(site.Driver, *url.URL, string) error {
 			if lim := s.limiter.Allow(closeLimitKey); lim != nil {
 				s.audit.Record(audit.Event{Event: "rate_limited", Site: "session_close", Result: lim.Reason})
@@ -335,7 +335,7 @@ func closeDetail(keys []string) string {
 
 func closePending(r *closeReq, sn flow.Snapshot) LogoutOutput {
 	return LogoutOutput{Status: "pending", LoginID: r.flow.ID, WaitingFor: "confirmation", ExpiresAt: fmtTime(sn.ExpiresAt),
-		NextTool: toolSessionClose, LinkHandover: handover(sn, "the page")}
+		NextTool: toolSessionClose, LinkHandover: handover(sn, "the page", r.flow.Origin())}
 }
 
 func (s *Server) awaitClose(ctx context.Context, mreq *mcp.CallToolRequest, r *closeReq, max time.Duration) (any, *ToolError) {

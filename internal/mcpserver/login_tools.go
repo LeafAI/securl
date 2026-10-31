@@ -15,6 +15,7 @@ import (
 	"github.com/LeafAI/securl/internal/dbsite"
 	"github.com/LeafAI/securl/internal/flow"
 	"github.com/LeafAI/securl/internal/netguard"
+	"github.com/LeafAI/securl/internal/notify"
 	"github.com/LeafAI/securl/internal/ratelimit"
 	"github.com/LeafAI/securl/internal/session"
 	"github.com/LeafAI/securl/internal/site"
@@ -190,16 +191,16 @@ func pendingOut(f *flow.Flow) *LoginOutput {
 	sn := f.Snapshot()
 	return &LoginOutput{Status: "pending", Site: f.Site, BaseURL: f.Base.String(), LoginID: f.ID,
 		WaitingFor: sn.Mode, Round: sn.Round, ExpiresAt: fmtTime(sn.ExpiresAt), NextTool: nextSessionWait,
-		LinkHandover: handover(sn, "the login page")}
+		LinkHandover: handover(sn, "the login page", f.Origin())}
 }
 
-// handover is the link part of a pending answer: empty unless the flow hands its link to the agent and a person is
-// being waited for. The instruction is written by securl, not by the site or the agent, and says what the agent may do.
-func handover(sn flow.Snapshot, what string) LinkHandover {
+// handover always identifies the serving process; only agent delivery includes a link and presentation instructions.
+func handover(sn flow.Snapshot, what string, origin notify.Origin) LinkHandover {
 	if sn.Link == "" {
-		return LinkHandover{}
+		return LinkHandover{Origin: &origin}
 	}
-	return LinkHandover{Link: sn.Link, KeyCode: sn.KeyCode, Instruction: "Show this link to the user exactly as it is, and tell them to open " +
+	return LinkHandover{Origin: &origin, Link: sn.Link, KeyCode: sn.KeyCode, Instruction: "Tell the user the request origin (the securl host, not the destination site): " + origin.Description() + ". " +
+		"Show this link to the user exactly as it is, and tell them to open " +
 		what + " and type there what it asks for. Tell them the key code, which the page shows too: if they differ, they must not type anything. " +
 		"Do not open the link yourself, do not change it, and do not say it is anything else. Then call the tool named in next_tool; " +
 		"it waits for the user. Describe the request honestly: it was made by you, for the reason you gave."}

@@ -214,6 +214,34 @@ An agent skill that teaches install, update, setup and use is in [`skills/securl
 the `skills/securl` directory into your client's skills directory (for Claude Code: `~/.claude/skills/securl/`).
 
 
+## Recognize the request's source
+
+DingTalk message titles include the securl hostname, and the message body includes **Request origin (securl host)**:
+
+```text
+host build-worker-1; account alice; PID 1234; linux/amd64
+```
+
+This is the machine/account running securl, **not** the target website, database or tunnel provider. With a CLI daemon,
+it identifies the daemon process, not the short-lived CLI caller. The same metadata accompanies pending login,
+second-factor, vault-unlock and session-close answers as `origin`, regardless of the DingTalk/agent delivery route:
+
+```json
+{"origin":{"hostname":"build-worker-1","user":"alice","pid":1234,"os":"linux","arch":"amd64"}}
+```
+
+The agent's link instruction tells it to show that origin to the person; CLI waiting messages print it on stderr before
+the link. Existing notification contents, destination, expiry and key code remain unchanged. The origin also labels
+Archery approval notifications, database-change notifications, and setup/doctor test messages sent through DingTalk.
+
+Metadata is collected locally, not accepted from the agent's reason or URL. Each string is limited to 128 characters
+and normalized for safe display; unavailable host/account values become `unknown` with a diagnostic warning. No IP
+address discovery, environment dump, paths, passwords, tokens or machine IDs are added. Hostname/account metadata is
+visible to the configured robot recipients and to the agent receiving a pending answer, so use an appropriately scoped
+robot. These labels are descriptive, **not authenticated proof**: still verify the destination and page key code before
+typing anything. Existing daemons/MCP servers need an intentional restart after upgrading to emit the new metadata;
+a daemon restart locks its vault and interrupts pending login flows.
+
 ## How a login works
 
 1. The agent calls `session_open(url)`. A valid cached session is reused (probed first).

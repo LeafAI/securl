@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"github.com/LeafAI/securl/internal/notify"
 	"github.com/LeafAI/securl/internal/site/archery"
 )
 
@@ -57,12 +58,12 @@ type LoginOutput struct {
 	LinkHandover
 }
 
-// LinkHandover is the part of a pending answer that exists only when the owner lets the login link go to the agent
-// (security.link_via_agent, with no DingTalk robot): the link, the code the page shows, and what to do with them.
+// LinkHandover identifies the origin of a pending request. Only agent delivery includes the link, key code and instruction.
 type LinkHandover struct {
-	Link        string `json:"link,omitempty"`
-	KeyCode     string `json:"key_code,omitempty"`
-	Instruction string `json:"instruction,omitempty"`
+	Origin      *notify.Origin `json:"origin,omitempty" jsonschema:"The securl process asking for human action; not the destination site."`
+	Link        string         `json:"link,omitempty"`
+	KeyCode     string         `json:"key_code,omitempty"`
+	Instruction string         `json:"instruction,omitempty"`
 }
 
 // RequestInput is what an agent may ask for. There is deliberately no field for a cookie, a token or an

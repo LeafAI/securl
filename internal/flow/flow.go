@@ -78,6 +78,7 @@ type Config struct {
 	Purpose  *Purpose
 	Keys     keyring.Source
 	Notifier Notifier
+	Origin   notify.Origin
 	// LinkViaAgent hands the link of every round to the agent (in the Snapshot) instead of the notifier, which is then
 	// never used. The person is no longer told by securl itself what is being asked, so the owner opts in to this.
 	LinkViaAgent bool
