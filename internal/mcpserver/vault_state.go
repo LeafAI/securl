@@ -47,7 +47,7 @@ func (s *Server) openCore() error {
 	}
 	c.mgr = flow.NewManager(flow.Config{
 		Keys:     c.keys,
-		Notifier: s.notify, LinkViaAgent: s.linkViaAgent(), Tunnels: s.tunnels, PageURL: s.cfg.Web.PageURL, TTL: s.cfg.Web.TTL, Log: s.log,
+		Notifier: s.notify, Origin: s.origin, LinkViaAgent: s.linkViaAgent(), Tunnels: s.tunnels, PageURL: s.cfg.Web.PageURL, TTL: s.cfg.Web.TTL, Log: s.log,
 		Admit: s.admit, OnRound: s.onRound, OnTunnel: s.onTunnel, Unlock: unlock, Seal: sealing,
 	})
 	c.closer = newCloser(s, c, unlock, sealing)

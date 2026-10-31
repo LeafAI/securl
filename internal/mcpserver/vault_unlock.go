@@ -40,7 +40,7 @@ func newUnlocker(s *Server) *unlocker {
 	u := &unlocker{s: s, guard: unlockguard.New(unlockguard.Config{}), base: base}
 	u.mgr = flow.NewManager(flow.Config{
 		Keys:     keyring.NewMemoryPool(s.cfg.Keys.MaxUses, s.cfg.Keys.MaxAge),
-		Notifier: s.notify, LinkViaAgent: s.linkViaAgent(), Tunnels: s.tunnels, PageURL: s.cfg.Web.PageURL, TTL: s.cfg.Vault.UnlockTTL, Log: s.log,
+		Notifier: s.notify, Origin: s.origin, LinkViaAgent: s.linkViaAgent(), Tunnels: s.tunnels, PageURL: s.cfg.Web.PageURL, TTL: s.cfg.Vault.UnlockTTL, Log: s.log,
 		OnTunnel: func(f *flow.Flow, provider string, attempts int) {
 			s.audit.Record(audit.Event{Event: "tunnel", Site: "vault", Tunnel: provider, Attempts: attempts})
 		},
@@ -157,7 +157,7 @@ func (s *Server) vaultUnlock(ctx context.Context, req *mcp.CallToolRequest, in V
 
 func unlockPending(f *flow.Flow, sn flow.Snapshot) VaultUnlockOutput {
 	return VaultUnlockOutput{Status: "pending", LoginID: f.ID, WaitingFor: "vault passphrase", ExpiresAt: fmtTime(sn.ExpiresAt),
-		NextTool: nextVaultUnlock, LinkHandover: handover(sn, "the page")}
+		NextTool: nextVaultUnlock, LinkHandover: handover(sn, "the page", f.Origin())}
 }
 
 func (s *Server) awaitUnlock(ctx context.Context, req *mcp.CallToolRequest, f *flow.Flow, max time.Duration) (any, *ToolError) {

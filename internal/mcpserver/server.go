@@ -60,6 +60,7 @@ type Server struct {
 	cfg     *config.Config
 	hc      *http.Client
 	notify  flow.Notifier
+	origin  notify.Origin
 	tunnels flow.TunnelStarter
 	log     func(string, ...any)
 	audit   *audit.Log
@@ -98,12 +99,16 @@ func New(cfg *config.Config, opt Options) (*mcp.Server, *Server, error) {
 	if err := ApplySiteOptions(cfg); err != nil {
 		return nil, nil, err
 	}
-	s := &Server{cfg: cfg, hc: opt.HTTP, log: opt.Log, db: realDB{}, fresh: freshnessOf(opt.SessionFreshness)}
+	origin, originErr := notify.LocalOrigin()
+	s := &Server{cfg: cfg, hc: opt.HTTP, log: opt.Log, db: realDB{}, fresh: freshnessOf(opt.SessionFreshness), origin: origin}
 	if s.hc == nil {
 		s.hc = netguard.New(netguard.Policy{AllowLocal: cfg.Security.AllowLocalAddresses, AllowedHosts: cfg.Security.AllowedHosts})
 	}
 	if s.log == nil {
 		s.log = func(f string, a ...any) { fmt.Fprintf(os.Stderr, "securl: "+f+"\n", a...) }
+	}
+	if originErr != nil {
+		s.log("request origin metadata incomplete: %v", originErr)
 	}
 	if cfg.Audit.On() {
 		a, err := audit.Open(cfg.Audit.File, s.log)
@@ -118,6 +123,7 @@ func New(cfg *config.Config, opt Options) (*mcp.Server, *Server, error) {
 	if s.notify == nil {
 		s.notify = &notify.DingTalk{Webhook: cfg.DingTalk.Webhook, Secret: cfg.DingTalk.Secret, Keyword: cfg.DingTalk.Keyword, Mobiles: cfg.DingTalk.Mobiles}
 	}
+	s.notify = notify.WithOrigin(s.notify, s.origin)
 	ts := opt.Tunnels
 	if ts == nil {
 		var err error

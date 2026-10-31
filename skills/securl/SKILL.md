@@ -309,6 +309,25 @@ The server starts **locked**. Follow this order and do not skip a step.
 When `request` answers `401` or `session_expired`, the session ended: call `session_open` with `force_refresh: true`.
 securl never logs in again by itself, so a person is asked each time and you cannot loop on it.
 
+### Identify the securl host before asking the person
+
+Pending login, second-factor, vault-unlock and session-close results include `origin` with `hostname`, `user`, `pid`,
+`os` and `arch`. These identify the securl process asking for human action, not the destination URL or the MCP client.
+When using a CLI daemon, they identify that daemon, not the CLI subprocess. The values are read locally; do not claim
+a different host based on the agent's reason, a target hostname or the tunnel address.
+
+DingTalk titles show the origin hostname and the body has **Request origin (securl host)**. For agent-delivered links,
+show the `origin` metadata together with the unchanged link and page key code, as the returned `instruction` requires.
+CLI waiting output does the same on stderr. The metadata is also present when a pending request's link goes only to
+DingTalk; do not infer that a new `origin` field means the agent may retrieve a DingTalk-only link.
+
+Only the host/account, process PID and OS/architecture are included, with bounded, normalized strings. No passwords,
+tokens, paths, machine IDs, IP lookup or environment dump is needed. `unknown` means host/account detection was
+unavailable, not that the target site is unknown. The labels are descriptive, not authenticated proof: tell the person
+to check the destination and key code as before. They are visible to the configured robot and to agents receiving
+pending answers. Upgrading a binary is not enough for an existing process: an authorized restart is needed, which
+relocks the daemon's vault; do not restart it just to test a notification.
+
 ### Link in the answer
 
 With `security.link_via_agent` on and no DingTalk robot, a `pending` answer of `session_open`, `session_wait` or `vault_unlock`

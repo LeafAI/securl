@@ -35,7 +35,7 @@ func sendTestMessage(webhook, secret, keyword string, mobiles []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	d := &notify.DingTalk{Webhook: webhook, Secret: secret, Keyword: keyword, Mobiles: mobiles}
-	return d.Markdown(ctx, "securl setup", "### securl setup\n\nThis is a test message from `securl config init`. No action needed.")
+	return notify.WithLocalOrigin(d).Markdown(ctx, "securl setup", "### securl setup\n\nThis is a test message from `securl config init`. No action needed.")
 }
 
 // vaultFor opens the handle on the vault that sits where the config file (given by -config, or the default) says.

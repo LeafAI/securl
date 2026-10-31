@@ -151,6 +151,7 @@ func withScope(tool string, input, next map[string]any) map[string]any {
 // announce tells the person at the terminal what is being waited for. The link of a handover is on stderr, never stdout:
 // stdout is the answer and nothing else.
 func announce(env Env, out map[string]any) {
+	announceOrigin(env, out)
 	if link, _ := out["link"].(string); link != "" {
 		fmt.Fprintf(env.Err, "\nOpen this link, compare the key code and type what the page asks for:\n\n  %s\n\n  key code: %v\n\n", link, out["key_code"])
 		return
