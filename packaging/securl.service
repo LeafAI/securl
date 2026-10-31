@@ -1,0 +1,13 @@
+[Unit]
+Description=securl secure MCP daemon
+ConditionUser=!root
+
+[Service]
+ExecStart=/usr/bin/securl daemon
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target
