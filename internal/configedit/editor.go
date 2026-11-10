@@ -13,6 +13,7 @@ import (
 	"github.com/LeafAI/securl/internal/config"
 	"github.com/LeafAI/securl/internal/filelock"
 	"github.com/LeafAI/securl/internal/site/generic"
+	"github.com/LeafAI/securl/internal/site/oauth2flow"
 )
 
 // Editor holds a config file as a YAML node tree. Methods mutate the tree; Save validates and writes it.
@@ -326,6 +327,11 @@ func (e *Editor) Validate() error {
 	}
 	for _, s := range cfg.Sites {
 		if _, err := generic.New(s); err != nil {
+			return err
+		}
+	}
+	for _, s := range cfg.OAuth2Sites {
+		if _, err := oauth2flow.New(s); err != nil {
 			return err
 		}
 	}

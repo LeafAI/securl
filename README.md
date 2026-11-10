@@ -430,6 +430,15 @@ roots:                       # sites served under a path prefix: host -> full ba
 aliases:                     # hostnames that do not hint at the product
   es.corp.example: kibana
   apm.corp.example: skywalking
+oauth2_sites:                # a site behind an OAuth 2.0 front (AWS ALB OIDC action, proxy) with GitLab as the identity provider
+  - name: skywalking         # the name of a built-in driver replaces it; "securl doctor -site <url>" shows what the site does
+    match_host: skywalking   # or use aliases:
+    idp:
+      type: gitlab
+      url: https://gitlab.corp.example   # required: the ONLY host the GitLab login is ever sent to
+      # login_method: auto   # auto | ldap | standard, as site_options.gitlab
+    # on_consent: approve    # GitLab's first-time "Authorize application" page: approve (default) | fail
+    # probe: {path: /graphql, expect_status: 200}
 sites:                       # any other website, no Go needed
   - name: grafana
     match_host: grafana
@@ -588,6 +597,7 @@ case the session was used on the site's own API, and a forged or missing credent
 | Kibana 7.9.3 | login with the flat `{username,password}` body, session probe, search through the console proxy |
 | Jenkins 2.226 | login (`j_acegi_security_check`), success decided by the `anonymous` flag of `/whoAmI/api/json`, the session-bound `Jenkins-Crumb` equals what `crumbIssuer` issues, a job listing that anonymous users get a 403 for |
 | SkyWalking 8.9.0 | no login needed: the URL answers and the GraphQL API returns data |
+| SkyWalking behind an AWS ALB with GitLab OIDC | tested against fakes only (a GitLab and an ALB-style front, with one-use codes and a state that changes on every request); not yet run against a real ALB |
 
 Real runs also found and fixed bugs that the fake servers had hidden: KubeSphere's request body and success response, its token
 probe (it accepted any token, because the redirect to the login page answers 200), and Kibana 7.x's request body; and, in the

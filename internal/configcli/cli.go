@@ -13,7 +13,6 @@ import (
 	"github.com/LeafAI/securl/internal/configedit"
 	"github.com/LeafAI/securl/internal/mcpserver"
 	"github.com/LeafAI/securl/internal/site"
-	"github.com/LeafAI/securl/internal/site/generic"
 	"github.com/LeafAI/securl/internal/vault"
 )
 
@@ -203,16 +202,7 @@ func parseEditor(ed *configedit.Editor) (*config.Config, error) {
 }
 
 // registerSites makes the configured custom sites resolvable (as the server does at start-up).
-func registerSites(cfg *config.Config) error {
-	for _, spec := range cfg.Sites {
-		d, err := generic.New(spec)
-		if err != nil {
-			return err
-		}
-		site.Replace(d)
-	}
-	return nil
-}
+func registerSites(cfg *config.Config) error { return mcpserver.RegisterConfigSites(cfg) }
 
 func openEditor(env Env) (*configedit.Editor, error) { return configedit.Open(env.Path) }
 

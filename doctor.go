@@ -154,6 +154,10 @@ func doctorTunnels(ctx context.Context, cfg *config.Config, providers []*tunnel.
 
 // doctorSite resolves a site like the login tools do and asks its driver what it will do (no credentials).
 func doctorSite(ctx context.Context, cfg *config.Config, rawURL, name string, report func(bool, string, string)) {
+	if err := mcpserver.RegisterConfigSites(cfg); err != nil {
+		report(false, "sites", err.Error())
+		return
+	}
 	if err := mcpserver.ApplySiteOptions(cfg); err != nil {
 		report(false, "site_options", err.Error())
 		return

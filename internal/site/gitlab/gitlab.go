@@ -78,37 +78,54 @@ func csrf(body string) string {
 	return ""
 }
 
+// Options are the settings that decide which sign-in form is used (site_options.gitlab).
+type Options struct {
+	LoginMethod  string // auto | ldap | standard ("" is auto)
+	LDAPProvider string // "" detects it from the page
+}
+
 func (d *driver) Login(ctx context.Context, base *url.URL, ask site.Asker, hc *http.Client) (*site.Session, error) {
 	c := site.JarClient(hc)
+	if err := SignIn(ctx, c, base, ask, Options{LoginMethod: d.option("login_method"), LDAPProvider: d.option("ldap_provider")}); err != nil {
+		return nil, err
+	}
+	return &site.Session{Cookies: site.CookiesFrom(c, base)}, nil
+}
+
+// SignIn signs the person in to the GitLab at base through its sign-in form, leaving the GitLab session cookie in c's
+// cookie jar (c must have one: see site.JarClient). It asks for a "login" round and, when GitLab asks for a second factor, a
+// "totp" round. It is what the gitlab driver does to log in, and what other drivers that sign in to GitLab on a person's
+// behalf (OAuth 2.0 sites with GitLab as the identity provider) reuse.
+func SignIn(ctx context.Context, c *http.Client, base *url.URL, ask site.Asker, o Options) error {
 	creds, err := ask.Ask(ctx, "login", site.LoginFields)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	page, err := get(ctx, c, base, "/users/sign_in")
 	if err != nil {
-		return nil, err
+		return err
 	}
-	loginPath, fields, err := d.form(page, creds)
+	loginPath, fields, err := form(page, creds, o)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tok := csrfIn(page, loginPath)
 	if tok == "" {
-		return nil, fmt.Errorf("%w: gitlab sign-in page has no CSRF token (is this GitLab?)", site.ErrLoginRejected)
+		return fmt.Errorf("%w: gitlab sign-in page has no CSRF token (is this GitLab?)", site.ErrLoginRejected)
 	}
 	fields.Set("authenticity_token", tok)
 	body, finalPath, err := post(ctx, c, base, loginPath, fields)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if isTwoFactorPage(body) { // 2FA required
 		if !totpAvailable(body) {
-			return nil, fmt.Errorf("%w: this account's second factor is WebAuthn/passkey or email only, which is not supported (TOTP is not enabled)", site.ErrLoginRejected)
+			return fmt.Errorf("%w: this account's second factor is WebAuthn/passkey or email only, which is not supported (TOTP is not enabled)", site.ErrLoginRejected)
 		}
 		code, err := ask.Ask(ctx, "totp", site.TOTPFields)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		body, finalPath, err = post(ctx, c, base, "/users/sign_in", url.Values{
 			"authenticity_token": {csrfIn(body, "/users/sign_in")},
@@ -117,29 +134,27 @@ func (d *driver) Login(ctx context.Context, base *url.URL, ask site.Asker, hc *h
 			"two_factor_method":  {"totp"},
 		})
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if isTwoFactorPage(body) {
-			return nil, fmt.Errorf("%w: invalid two-factor code", site.ErrBadCredentials)
+			return fmt.Errorf("%w: invalid two-factor code", site.ErrBadCredentials)
 		}
 	}
 	switch {
 	case strings.HasPrefix(finalPath, "/users/sign_in") || strings.Contains(body, `name="user[password]"`):
-		return nil, fmt.Errorf("%w: invalid login or password", site.ErrBadCredentials)
+		return fmt.Errorf("%w: invalid login or password", site.ErrBadCredentials)
 	}
-	s := &site.Session{Cookies: site.CookiesFrom(c, base)}
-	if !hasCookie(s, "_gitlab_session") {
-		return nil, fmt.Errorf("%w: no session cookie was issued", site.ErrLoginRejected)
+	if !hasCookie(site.CookiesFrom(c, base), "_gitlab_session") {
+		return fmt.Errorf("%w: no session cookie was issued", site.ErrLoginRejected)
 	}
-	return s, nil
+	return nil
 }
 
 var ldapForm = regexp.MustCompile(`action=["'](/users/auth/(ldap[A-Za-z0-9_]*)/callback)["']`)
 
 // form decides which sign-in form to use and builds its fields (without the CSRF token).
-func (d *driver) form(page string, creds site.Credentials) (path string, fields url.Values, err error) {
-	method := d.option("login_method")
-	provider := d.option("ldap_provider")
+func form(page string, creds site.Credentials, o Options) (path string, fields url.Values, err error) {
+	method, provider := strings.TrimSpace(o.LoginMethod), strings.TrimSpace(o.LDAPProvider)
 	var found string
 	if m := ldapForm.FindStringSubmatch(page); m != nil {
 		found = m[2]
@@ -188,8 +203,8 @@ func totpAvailable(body string) bool {
 	return true
 }
 
-func hasCookie(s *site.Session, name string) bool {
-	for _, c := range s.Cookies {
+func hasCookie(cookies []*http.Cookie, name string) bool {
+	for _, c := range cookies {
 		if c.Name == name {
 			return true
 		}

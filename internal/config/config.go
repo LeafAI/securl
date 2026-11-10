@@ -13,6 +13,7 @@ import (
 
 	"github.com/LeafAI/securl/internal/seal"
 	"github.com/LeafAI/securl/internal/site/generic"
+	"github.com/LeafAI/securl/internal/site/oauth2flow"
 	"github.com/LeafAI/securl/internal/totp"
 	"github.com/LeafAI/securl/internal/vault"
 )
@@ -39,6 +40,8 @@ type Config struct {
 	Archery Archery           `yaml:"archery"`
 	// Sites defines extra websites with the declarative generic driver.
 	Sites []generic.Spec `yaml:"sites"`
+	// OAuth2Sites defines sites behind an OAuth 2.0 front (an AWS ALB OIDC action, a proxy) with GitLab as the identity provider.
+	OAuth2Sites []oauth2flow.Spec `yaml:"oauth2_sites"`
 	// Databases lists the PostgreSQL and MySQL databases an agent may run SQL against (non-production only).
 	Databases []Database `yaml:"databases"`
 	Daemon    Daemon     `yaml:"daemon"`
@@ -176,6 +179,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := validateDatabases(c.Databases); err != nil {
+		return err
+	}
+	if err := c.validateOAuth2Sites(); err != nil {
 		return err
 	}
 	if t := c.Security.LinkTOTP; t.Enabled {

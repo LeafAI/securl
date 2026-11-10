@@ -112,7 +112,11 @@ func (s *Server) ensureLogin(ctx context.Context, req *mcp.CallToolRequest, raw,
 	// A forced login does not delete the saved session first. It is replaced when the new login has succeeded (Put), and kept
 	// when the person rejects, does not answer, or types something the site refuses: erasing it at the start would make
 	// force_refresh a way to close a session (a database account, which nobody can give back) without session_close's question.
-	f := c.mgr.Start(d, base, reason, s.hc, func(f *flow.Flow, r flow.Result) {
+	detail := ""
+	if dt, ok := d.(site.Detailer); ok {
+		detail = dt.Detail(base)
+	}
+	f := c.mgr.StartDetailed(d, base, reason, detail, s.hc, func(f *flow.Flow, r flow.Result) {
 		var rj *flow.RejectedError
 		switch {
 		case r.Err == nil:
@@ -264,10 +268,16 @@ var builtinInfo = map[string]SiteInfo{
 
 func (s *Server) sites(_ context.Context, _ *mcp.CallToolRequest, _ Empty) (any, *ToolError) {
 	var out SitesOutput
+	oauth := map[string]bool{}
+	for _, o := range s.cfg.OAuth2Sites {
+		oauth[o.Name] = true
+	}
 	for _, n := range site.Names() {
 		info, ok := builtinInfo[n]
 		info.Name, info.Source = n, "builtin"
-		if !ok {
+		if oauth[n] {
+			info = SiteInfo{Name: n, Auth: "cookie", NeedsLogin: true, Rounds: []string{"login", "totp?"}, Match: "configured match_host", Source: "config"}
+		} else if !ok {
 			info = SiteInfo{Name: n, Auth: "cookie", NeedsLogin: true, Rounds: []string{"login", "totp?"}, Match: "configured match_host", Source: "config"}
 		}
 		out.Sites = append(out.Sites, info)
