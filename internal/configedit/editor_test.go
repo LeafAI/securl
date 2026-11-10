@@ -406,3 +406,22 @@ func TestLinkViaAgentIsASettableBoolean(t *testing.T) {
 		t.Error("a non-boolean must be rejected")
 	}
 }
+
+func TestValidateBuildsOAuth2Sites(t *testing.T) {
+	good := "oauth2_sites:\n  - name: skywalking\n    idp: {type: gitlab, url: 'https://gitlab.corp.example'}\n"
+	e, err := Open(write(t, good))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Validate(); err != nil {
+		t.Errorf("valid: %v", err)
+	}
+	bad := "oauth2_sites:\n  - name: skywalking\n    idp: {type: gitlab, url: 'http://gitlab.corp.example'}\n"
+	e, err = Open(write(t, bad))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Validate(); err == nil || !strings.Contains(err.Error(), "https") {
+		t.Errorf("an idp over http must be refused before saving: %v", err)
+	}
+}

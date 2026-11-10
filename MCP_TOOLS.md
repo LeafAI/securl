@@ -177,7 +177,8 @@ share one flow (same `login_id`).
 
 Send an HTTP request to a site that has a session. The gateway puts the session's cookies and tokens into the request and
 removes them from the answer, so the agent neither sends nor receives a credential. It never opens a session by itself:
-without one it answers `no_session` (asking a person is `session_open`'s job). A site that needs no login at all (SkyWalking)
+without one it answers `no_session` (asking a person is `session_open`'s job). A site that needs no login at all (SkyWalking, unless the owner configured it with `oauth2_sites`, in which case it has a
+session like any other site)
 has no session to look for: the request goes out as it is, with no credential added.
 
 **Archery is refused** (`request_not_allowed`) unless the owner sets `security.allow_archery_requests: true`. A change on

@@ -195,6 +195,33 @@ Use `securl doctor -site <url>` for every site before the first login. It needs 
 | Archery 1.12.0 | `archery` | `archery.default_group` (resource group name); `roots:` if under a path. |
 | RocketMQ Dashboard 2.x | `rocketmq` | Log in with a **normal** (non-admin) Dashboard account that is used for nothing else: this Dashboard takes the password in the URL query, so a gateway or the Dashboard may log it. The request tool lets through `GET` of `.query` paths only and never a message body; `site_options.rocketmq.allow_message_body: "yes"` opens `/message/`, `/messageTrace/` and `/dlqMessage/`. |
 | SkyWalking (no login) | `skywalking` | none. |
+| Any site behind an OAuth 2.0 front with GitLab as the identity provider (an AWS ALB `authenticate-oidc` action, oauth2-proxy), e.g. SkyWalking | `oauth2_sites:` entry | `idp.url` (the GitLab address) is required and is the only host a GitLab password is ever sent to. See below. |
+
+### Sites behind GitLab sign-in (`oauth2_sites`)
+
+Some sites have no login of their own: a front (an AWS Application Load Balancer with an OIDC action, or a proxy) sends an
+anonymous browser to GitLab, redeems the code GitLab sends back, and issues its own session cookies. Describe such a site:
+
+    oauth2_sites:
+      - name: skywalking              # a built-in driver of the same name is replaced
+        match_host: skywalking        # or aliases:
+        idp: {type: gitlab, url: https://gitlab.corp.example}
+
+Run `securl doctor -site https://skywalking.corp.example` first: it asks the site anonymously where it sends a login and says
+whether that is the configured GitLab (names and hosts only, never a value). A site that redirects anywhere else is refused
+before anybody is asked.
+
+What happens at `session_open`: the person receives one message and types their **GitLab username and password** (and the
+one-time code, if GitLab asks for one) on the usual sealed page; the labels name the GitLab host. securl signs in to GitLab, then
+runs the whole redirect chain itself in one go, so the state, nonce and code are fresh, and keeps only the **site's** cookies and
+their expiry. The GitLab password and GitLab's own cookie are not kept; securl does not sign out of GitLab. When the ALB session
+ends the agent gets `session_expired` and a person signs in again.
+
+- GitLab's first-time "Authorize application" page is approved by securl once (the message says so) when the form matches the
+  request it just made. `on_consent: fail` stops instead and asks the person to approve it once in a browser.
+- Second factors other than TOTP (WebAuthn, passkeys, e-mail) are not supported, as for the `gitlab` driver.
+- With `security.link_via_agent` the agent relays the link to securl's own page, as for every driver; it never sees a GitLab URL.
+- `security.allowed_hosts`, when set, must list the GitLab host too.
 
 Host names rarely contain the product name, so add `aliases:` (`es.corp.example: kibana`) and, to limit what the
 agent may target, `security.allowed_hosts`.

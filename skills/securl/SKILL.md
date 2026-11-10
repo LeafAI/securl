@@ -304,7 +304,10 @@ The server starts **locked**. Follow this order and do not skip a step.
    - RocketMQ Dashboard has a request policy: only `GET` of `.query` paths, and nothing under `/message/`,
      `/messageTrace/` or `/dlqMessage/` (message bodies; the owner opens them with `site_options.rocketmq.allow_message_body`).
      Anything else answers `request_not_allowed` and is never sent; do not look for another way around it.
-6. A site that needs no login (SkyWalking) works with `request` directly; `session_open` just confirms `auth: none`.
+6. A site that needs no login (SkyWalking) works with `request` directly; `session_open` just confirms `auth: none`. A site that
+   sits behind GitLab sign-in has an `oauth2_sites` entry in the owner's config: `session_open` asks a person for their GitLab
+   login (the message names the GitLab host) and `auth` is then `cookie`. If `session_open` says the site needs a login and
+   there is no such entry, tell the user to add one; do not try to log in yourself.
 
 When `request` answers `401` or `session_expired`, the session ended: call `session_open` with `force_refresh: true`.
 securl never logs in again by itself, so a person is asked each time and you cannot loop on it.

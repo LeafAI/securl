@@ -94,6 +94,12 @@ type Configurable interface {
 	Configure(opts map[string]string)
 }
 
+// Detailer is implemented by drivers whose human rounds need securl's own explanation: what the person is about to do or
+// agree to, in securl's words and not the agent's. The text is shown in the message under the agent's reason.
+type Detailer interface {
+	Detail(base *url.URL) string
+}
+
 // Inspector is implemented by drivers that can describe, without any credentials, what they will do against a
 // given server (login method, product generation, challenges). It powers `securl doctor -site`.
 type Inspector interface {

@@ -26,6 +26,7 @@ import (
 	"github.com/LeafAI/securl/internal/site"
 	"github.com/LeafAI/securl/internal/site/archery"
 	"github.com/LeafAI/securl/internal/site/generic"
+	"github.com/LeafAI/securl/internal/site/oauth2flow"
 	"github.com/LeafAI/securl/internal/tunnel"
 	"github.com/LeafAI/securl/internal/vault"
 )
@@ -89,12 +90,8 @@ type core struct {
 
 // New builds the MCP server with all tools registered.
 func New(cfg *config.Config, opt Options) (*mcp.Server, *Server, error) {
-	for _, spec := range cfg.Sites {
-		d, err := generic.New(spec)
-		if err != nil {
-			return nil, nil, err
-		}
-		site.Replace(d)
+	if err := RegisterConfigSites(cfg); err != nil {
+		return nil, nil, err
 	}
 	if err := ApplySiteOptions(cfg); err != nil {
 		return nil, nil, err
@@ -154,6 +151,26 @@ func New(cfg *config.Config, opt Options) (*mcp.Server, *Server, error) {
 		}
 	}
 	return m, s, nil
+}
+
+// RegisterConfigSites makes the sites defined in the configuration (sites: and oauth2_sites:) resolvable. A site of the same
+// name as a built-in driver replaces it.
+func RegisterConfigSites(cfg *config.Config) error {
+	for _, spec := range cfg.Sites {
+		d, err := generic.New(spec)
+		if err != nil {
+			return err
+		}
+		site.Replace(d)
+	}
+	for _, spec := range cfg.OAuth2Sites {
+		d, err := oauth2flow.New(spec)
+		if err != nil {
+			return err
+		}
+		site.Replace(d)
+	}
+	return nil
 }
 
 // ApplySiteOptions hands the `site_options:` section to the drivers that accept options.

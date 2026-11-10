@@ -266,7 +266,10 @@ func siteList(env Env) error {
 	for _, s := range cfg.Sites {
 		fmt.Fprintf(env.Out, "  %s  custom site, matches hosts containing %q\n", s.Name, s.MatchHost)
 	}
-	if len(list) == 0 && len(cfg.Sites) == 0 {
+	for _, s := range cfg.OAuth2Sites {
+		fmt.Fprintf(env.Out, "  %s  OAuth 2.0 site (GitLab sign-in at %s), matches hosts containing %q\n", s.Name, s.IDPHost(), s.MatchHost)
+	}
+	if len(list) == 0 && len(cfg.Sites) == 0 && len(cfg.OAuth2Sites) == 0 {
 		fmt.Fprintln(env.Out, "  (none; sites whose host name contains the product name, e.g. gitlab.corp.example, work without any setting)")
 	}
 	return nil

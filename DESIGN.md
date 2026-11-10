@@ -270,7 +270,7 @@ Phase-1 flows (to be verified against real instances during implementation):
 | KubeSphere | POST `/oauth/token` (password grant) → `access_token`/`refresh_token`; also v4 `/login` cookie path. Return bearer header |
 | Nightingale (v7) | POST `/api/n9e/auth/login` → `access_token`/`refresh_token`; return bearer header |
 | Archery | GET `/login/` for `csrftoken`, POST `/authenticate/` (+2FA if enabled). Collect `sessionid`, `csrftoken` |
-| SkyWalking | No login needed today → `noauth` driver: `session_open` probes the URL, returns an empty session with `auth: none`, never prompts. `generic` can add basic/form auth later |
+| SkyWalking | No login needed today → `noauth` driver: `session_open` probes the URL, returns an empty session with `auth: none`, never prompts. Behind an OAuth 2.0 front (AWS ALB OIDC action) with GitLab as the provider: an `oauth2_sites` entry (`oauth2flow` driver, `docs/SPEC-oauth2.md`): the person types the GitLab login, securl runs the redirect chain and keeps the site's cookies |
 
 ### 4.6 Sessions (`session`)
 In-memory cache keyed by `scheme://host`, TTL from driver; on a `session_open` call, run `Probe` first and
