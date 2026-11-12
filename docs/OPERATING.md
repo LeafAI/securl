@@ -348,6 +348,31 @@ Things to know: the group sees what the agent posts, behind a line that says an 
 anyone in the group can write to the agent; `send_limit` (20 a minute by default) is per bot; and no message text is in the audit
 log (`grep telegram audit.jsonl` shows the bot, the chat, sizes and hashes).
 
+### DingTalk: letting an agent send to a group
+
+An agent can send to groups you name, each through a custom robot of that group. It can **only send**: a custom robot cannot read a
+group, so there is no way for an agent to read one. It never gets the robot's webhook and never chooses an address. This is a robot of
+its own for each group, apart from the one in section 2 that carries login links.
+
+1. **Make a robot in the group.** In DingTalk: group settings, Robots, add a robot, Custom robot. Under security settings, pick what
+   suits you: a keyword, a signature ("sign": you get a secret that starts with `SEC`), or an address list. Keep the webhook it shows
+   (`https://oapi.dingtalk.com/robot/send?access_token=...`). Treat it like a password: whoever has it can speak in the group.
+2. **Tell securl.** `securl config dingtalk group add` (guided) or
+   `securl config dingtalk group add --name ops --sign --keyword deploy`; it never asks for the webhook or the secret. `--sign` is for a
+   robot that uses a signature, `--keyword` for one with a keyword (securl puts it in its own first line, so the agent need not know
+   it). `securl config dingtalk group list|remove` manage them. `--send-limit` and `--send-window` change the limit (default 10 a
+   minute; a rate over 20 a minute is refused, because DingTalk throttles a robot for ten minutes beyond that).
+3. **Paste the webhook once.** The agent calls `session_open` with `dingtalk://ops`; you get the usual link and paste the webhook on the
+   page (and the signing secret, if the group signs). Only the real DingTalk address is accepted. Nothing is sent to the group by this.
+   `session_close` with the same URL forgets it, after you confirm.
+4. **A wrong webhook is found at the first send,** not at the login: DingTalk has no way to check a robot without posting a message. The
+   agent is then told the session ended and a person pastes the right one. `securl doctor -dingtalk-groups` checks that DingTalk can be
+   reached, and cannot check the webhook.
+
+Things to know: the group sees what the agent posts, behind a line that says an AI agent sent it; nobody can be mentioned; the text is
+plain text, so links are not clickable markup; a robot's own security settings can refuse a message (`refused_by_robot`: only you can
+change them); and no message text is in the audit log (`grep dingtalk audit.jsonl` shows the group, sizes and hashes).
+
 ## 8. Not supported (yet)
 
 GitLab reCAPTCHA after repeated failures; WebAuthn/passkey-only accounts; Jenkins 2FA plugins; any TOTP on Kibana

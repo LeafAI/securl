@@ -56,6 +56,7 @@ internal/
   site/                      # Driver interface + registry
     gitlab/ kibana/ kubesphere/ nightingale/ archery/ skywalking/
   telegram/ telegramsite/    # Bot API client + bounded inbox; the bot-token login driver (telegram://<bot>)
+  dingtalk/ dingtalksite/    # custom-robot client (send only); the webhook login driver (dingtalk://<group>)
   slidewindow/               # the per-bot send limit
     generic/                 # declarative form/JSON login driven by YAML (any other site)
   session/                   # cache, singleflight per host, validity probe
@@ -297,6 +298,7 @@ they were; the first is audited as `session_dropped`.
 | `request` | `url`, `method`, `path`, `query?`, `headers?`, body | `{status, headers, body, redactions, ...}`: credentials put in and taken out |
 | `session_list` | – | cached hosts + expiry (no secrets) |
 | `session_close` | `url` or `all`, `close_id?` | drops the named sessions after a person typed `DELETE` on a page |
+| `dingtalk_targets` / `dingtalk_send` | `group`, `text` | the configured groups; `{sent}`. Send only, no read (section 8) |
 | `telegram_targets` / `telegram_send` / `telegram_read` | `bot`, `chat`, `text` / `limit?`, `wait_seconds?` | the configured bots and chats; `{sent, message_id}`; messages marked untrusted (see section 8) |
 | `archery_query` | `url`, `instance`, `db`, `sql`, `limit` | rows (read-only query endpoint, no approval) |
 | `archery_run_sql` | `url`, `instance`, `db`, `sql`, `remark`, `wait_timeout_s?` | execution result (sync) |
@@ -434,6 +436,36 @@ MCP registration: `claude mcp add login -- login`.
     spoke"; the answer says so. `from` is what a sender calls themselves. Another process of the same user can use the sessions the
     daemon holds, like any other site. With `telegram.proxy` the proxy sees that the bot talks, and holds a credential if one is in its
     address (shown masked everywhere); without it the environment's proxy is not used, so it never changes where the token goes.
+
+- **A DingTalk group is a channel an agent can write into and cannot read.** `dingtalk_send` lets an agent speak in the groups the
+  owner named, each through a custom robot of that group. A custom robot only sends; that is why there is no read tool, and why the
+  prompt-injection channel that Telegram's read side is does not exist here. What is defended, and what is not:
+  - *What an agent may reach.* It names a configured group. It never gives a webhook, a token, an address, a mention or a message type,
+    and an argument outside the schema is refused. The robot that carries login links to a person (`dingtalk.webhook`) is a different
+    thing and is not reachable by these tools.
+  - *The webhook is the whole credential, and a person types it.* Whoever holds the `access_token` can speak in the group. It is
+    pasted on the usual page, sealed in the browser, and kept in the vault: in no configuration, argument or environment variable. A
+    file that has one is refused without echoing it. Only `https://oapi.dingtalk.com/robot/send?access_token=...` is accepted, with no
+    other host, port, user name, path or parameter: a person can be tricked into pasting an address, and accepting one that points
+    elsewhere would send the token there. Only the `access_token` is kept, and the address is rebuilt from it.
+  - *The token is in the query of every request*, so the places it could leak are the ones that print a request: a `*url.Error`, a
+    server body that echoes it, a proxy's answer. No error is made from what a transport or a server said, redirects are never followed,
+    and the tests search every answer, error, notification and audit line for it. securl cannot check a webhook without posting a
+    message (DingTalk has no such call), so **a login sends nothing and checks nothing**, and a wrong or removed robot is found by the
+    first send, which ends the session. The cost is that a typo is found later than with Telegram, whose `getMe` checks a token.
+  - *Sending is not confirmed, and cannot be undone.* Text is plain text, never markdown (a client loads the images and links in
+    markdown without anybody clicking), the mention list is always empty and "everybody" is always off, so an agent cannot call people or
+    the whole group. securl writes the first line (an AI agent sent it, from which machine, and the robot's keyword if it has one) and the
+    agent cannot remove it. Every send is audited by size and SHA-256, never the text. Everyone in the group sees what the agent posts,
+    including what it quotes from elsewhere: an agent that read a secret in another tool can post it.
+  - *Limits.* DingTalk limits a robot to 20 messages a minute and throttles it for ten minutes beyond that (its documentation says
+    so); the default here is 10 a minute and a configuration is refused if its *rate* exceeds 20 a minute, so 20 in 30 seconds does not
+    pass. A throttle makes nobody ask again until it is over. The 4000-character limit on the text is securl's own cautious choice:
+    DingTalk's own limit was not found in its documentation and was not measured.
+  - *What securl cannot know.* Messages are not end-to-end encrypted: DingTalk can read them. The robot's own security settings
+    (keyword, signature, address list) are the owner's, and a refusal by them is reported as such. Another process of the same user can
+    use the sessions the daemon holds, like any other site. DingTalk's endpoint answers the same way whether or not securl is the one
+    asking, so the audit trail is securl's and not DingTalk's.
 
 ## 9. Milestones
 
