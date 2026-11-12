@@ -315,6 +315,15 @@ exists only while a person is being asked.
   one, and audited (size and hash, never the text). **What an agent reads there was written by other people**, and every read says so;
   that lowers the risk of an instruction hidden in a group message and does not remove it. Reading is on by default and can be
   switched off per chat (`read: false`). `docs`: DESIGN.md, "Threat model", says what is and is not defended.
+- **DingTalk groups** (`dingtalk.groups:`) let an agent send to the groups the owner names, each through a custom robot of that group.
+  **Send only**: a custom robot cannot read a group, so there is no tool that does. The agent names a group; it never supplies a
+  webhook, an address, a mention or a message type. The robot's webhook (and its signing secret, if it signs) is pasted by a person on
+  the usual page and kept in the vault; only `https://oapi.dingtalk.com/robot/send?access_token=...` is accepted, so a person tricked
+  into pasting another address does not send the token there. It is in no answer, error, audit line or message. Text goes out as plain
+  text (never markdown, which loads links and images by itself), nobody can be mentioned, and securl writes a first line that says an
+  AI agent sent it. DingTalk throttles a robot that sends more than 20 messages a minute for ten minutes, so the default is 10 and no
+  setting may amount to more than 20. Sends are not confirmed one by one, and are audited (size and hash, never the text). A login
+  posts nothing, because DingTalk cannot check a robot without posting: a wrong webhook is found by the first send.
 - `archery.allow_ddl: false` is enforced by a SQL scanner (comments, strings and `;` aware, MySQL executable
   comments included, `PREPARE`/`EXECUTE` refused, anything unparsable refused), not a pattern match.
 - Every secret securl keeps (logged-in sessions, TOTP secrets) is in one **vault**: AES-256-GCM under a random master
@@ -384,6 +393,13 @@ dingtalk:
   secret: SEC...            # signing secret, if the robot uses "加签"
   keyword: login            # only if the robot requires a keyword
   at_mobiles: ["138..."]    # phone numbers to @mention: digits only; each message starts with "@number" for every one
+  groups:                   # groups an agent may send to; `securl config dingtalk group add` writes this. NOT the robot above
+    - name: ops             # what an agent calls it; the WEBHOOK is never here: a person pastes it at the first session_open
+    - name: alerts
+      sign: true            # the robot uses "加签": its signing secret is asked for on the page too, never written here
+      keyword: deploy       # the robot's keyword, if it has one; securl writes it into its own first line
+      # send_limit: 10      # messages the robot sends per send_window (DingTalk throttles it above 20 a minute for ten minutes)
+      # send_window: 1m
 tunnel:
   order: [pinggy, localhost.run, serveo, tunnl]   # ssh-j is TCP-only and is never used for the web API
   timeout: 20s
@@ -474,7 +490,7 @@ Every tool has a title and an output schema. Read-only resources: `securl://site
 
 `vault_status`, `vault_unlock`, `session_open`, `session_wait`, `site_list`, `session_list`, `session_close`, `archery_instances`, `archery_groups`, `archery_query`,
 `archery_run_sql`, `archery_wait`, `archery_workflow_status`, `archery_cancel`, `db_targets`, `db_query`, `db_exec`,
-`telegram_targets`, `telegram_send`, `telegram_read`.
+`telegram_targets`, `telegram_send`, `telegram_read`, `dingtalk_targets`, `dingtalk_send`.
 Long operations return a `pending` result with an id after `max_block_seconds`; resume with `session_wait` /
 `archery_wait`. `session_close` is one of them: it closes nothing until a person has typed `DELETE` on a page that names the
 sessions (a database account is a password that cannot be recovered), so it answers `pending` and is resumed with its `close_id`.
@@ -493,7 +509,7 @@ securl archery run-sql --url https://archery.corp.example --instance x --databas
 ```
 
 - Every command, by the tool it runs: `securl session open|wait|list|close`, `securl site list`, `securl request`, `securl db
-  targets|query|exec`, `securl telegram targets|send|read` and `securl archery instances|groups|query|run-sql|wait|workflow-status|cancel`. `securl session close`
+  targets|query|exec`, `securl telegram targets|send|read`, `securl dingtalk targets|send` and `securl archery instances|groups|query|run-sql|wait|workflow-status|cancel`. `securl session close`
   asks a person to confirm and waits for them. The flags of a command are `securl <group> <command> --help`. Besides the
   tools: `securl vault init|status|passwd|migrate`, `securl unlock`, `securl daemon` (and `status`, `install`, `uninstall`),
   `securl doctor`, `securl config ...`, `securl page [dir]` (write the login page to a directory, to host it yourself),
