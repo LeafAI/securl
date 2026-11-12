@@ -41,6 +41,10 @@ func (s *Server) openCore() error {
 	if len(s.cfg.Telegram.Bots) > 0 {
 		site.Replace(s.telegramDriver())
 	}
+	// And a DingTalk group's, in the same way.
+	if len(s.cfg.DingTalk.Groups) > 0 {
+		site.Replace(s.dingtalkDriver())
+	}
 	c.cache = session.NewPersistent(session.NewStore(s.vault))
 	c.cache.Log = s.log
 	// A session the cache drops on its own (it expired, or the site refused it) is a decision the person did not make and
@@ -56,6 +60,7 @@ func (s *Server) openCore() error {
 	})
 	c.closer = newCloser(s, c, unlock, sealing)
 	c.telegram = newTelegramBots()
+	c.dingtalk = newDingTalkGroups()
 	c.tracker = archery.NewTracker(s.cfg.Archery.DDLAllowed(), s.cfg.Archery.WaitTimeout)
 	c.tracker.Poll = s.cfg.Archery.PollInterval
 	s.core = c

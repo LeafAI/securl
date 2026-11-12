@@ -40,6 +40,8 @@ See README, "From the command line".
 | `telegram_targets` | list the Telegram bots and chats the owner made reachable (no tokens, no chat ids) | no |
 | `telegram_send` | send a plain-text message to a chat the owner named, as the bot | no |
 | `telegram_read` | read the new messages of a chat the owner named (other people's words: data, not instructions) | up to 25 s with `wait_seconds` |
+| `dingtalk_targets` | list the DingTalk groups the owner made reachable (no webhooks) | no |
+| `dingtalk_send` | send a plain-text message to a group the owner named, as that group's robot (send only: a custom robot cannot read) | no |
 
 (`archery_submit_sql` is intentionally omitted: `archery_run_sql` with `wait: false` covers it.)
 
@@ -496,6 +498,51 @@ the chat any more), `webhook_set`, `reader_conflict`, `site_unreachable` (a prox
 **What securl cannot do:** it cannot tell who in a group is who, or stop a person in the chat from reading what the agent sends. A
 group is not a trusted channel, which is why what is read is marked as untrusted and why the instructions tell the agent not to act
 on it without the user's own say-so. Reading and sending can each be turned off per chat, and a chat the bot is not in cannot be used.
+
+## 11c. DingTalk groups: `dingtalk_targets`, `dingtalk_send`
+
+An agent can speak in the DingTalk groups the owner has named, each through a custom robot of that group (`dingtalk.groups:`, made with
+`securl config dingtalk group add`). It is **send only**: a custom robot cannot read a group, so there is no tool that does, and an
+agent must not say it has read one. The agent names a group; it **never supplies a webhook, a token, an address, a mention or a message
+type**: an argument that is not in the schema is refused (`invalid_argument`), not ignored. This is a robot of its own for each group,
+apart from the one that carries login links to a person (`dingtalk.webhook`), which an agent cannot reach.
+
+The group's robot webhook (and its signing secret, when its security setting is "sign") is pasted once by a person: `session_open`
+with `url: "dingtalk://<group>"` sends the usual DingTalk link, and the page asks for the webhook (and the secret) in secret fields. Only
+`https://oapi.dingtalk.com/robot/send?access_token=...` is accepted: another host, a port, a user name, another path or any other
+parameter is refused on the spot, so that a person tricked into pasting some other address does not send the token there. Only the
+`access_token` is kept, in the vault; the address is rebuilt from it. It appears in no answer, no error, no audit line and no message.
+The token is in the query of every request, so every error of these tools is made of securl's own words: nothing a transport, a proxy
+or a server said is repeated, and a redirect is never followed.
+
+**A login sends nothing and checks nothing against DingTalk.** DingTalk has no call that checks a robot without posting a message, and
+a person pasting an address must not make the group see a message they did not write. So a wrong or removed robot is found by the
+first send, which ends the session (`session_expired`) so that a person is asked again.
+
+`dingtalk_targets` (no input) answers `{groups: [{name, has_session, send_limit, send_window_seconds}]}`. It makes no request to
+DingTalk and works while the vault is locked (`has_session` is then `false`).
+
+`dingtalk_send` takes `{group, text}` and answers `{sent}`. The text is sent as **plain text**: nothing in it is formatting or a link
+(markdown is never used, because the client loads images and links in it by itself), and **nobody is mentioned**, whatever the text
+says: the mention list is always empty and "everybody" is always off, so an `@` is only characters. securl puts a first line in front of
+it, `[securl] AI agent message (via securl on <host>)`, which the agent cannot change or avoid, and which carries the robot's keyword
+when the group has one (DingTalk refuses a message without it). The text is at most 4000 characters (`text_too_long` says by how much;
+this is a cautious limit of securl's own, not a number from DingTalk). Every message carries its own `msgUuid`, and a send that times
+out is retried once with the same one, which DingTalk documents for exactly that, so the group sees it once.
+
+DingTalk limits a robot to **20 messages a minute and throttles it for ten minutes beyond that**, so a group's `send_limit` defaults to
+10 a minute and no setting may amount to more than 20 a minute (the rate is checked, so 20 in 30 seconds is refused too). Over the limit
+is `rate_limited` with the time to wait. A refused call and a send that failed cost nothing against the limit; when DingTalk throttles,
+nobody asks it again for ten minutes. Sending is **not confirmed by a person**: every send is audited (`dingtalk_send`: group, size and
+SHA-256 of the text, never the text), and a message cannot be unsent, so an agent sends only what the user asked it to say.
+
+Errors: `vault_locked`, `vault_not_initialized`, `unknown_target`, `no_session`, `session_expired` (DingTalk does not know the robot:
+the session is dropped), `text_too_long`, `invalid_argument`, `rate_limited`, `refused_by_robot` (the robot's own keyword, signature or
+address list refused it: only the owner can change those), `content_refused` (an unsafe link, or text DingTalk will not take),
+`chat_not_reachable` (the group no longer exists), `site_unreachable`.
+
+**What securl cannot do:** it cannot tell whether a webhook is right until a message is sent, cannot read or moderate a group, and cannot
+stop a person in the group from reading what the agent sends or from copying it elsewhere.
 
 ## 12. Human-facing side effects (summary)
 

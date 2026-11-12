@@ -66,10 +66,10 @@ func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 	known := map[string]bool{
 		"config": true, "vault": true, "doctor": true, "page": true, "version": true,
 		// the tools, as commands
-		"session": true, "site": true, "db": true, "archery": true, "telegram": true, "request": true, "serve": true, "daemon": true, "unlock": true,
+		"session": true, "site": true, "db": true, "archery": true, "telegram": true, "dingtalk": true, "request": true, "serve": true, "daemon": true, "unlock": true,
 	}
 	sub := map[string]map[string]bool{
-		"config":   {"init": true, "site": true, "show": true, "get": true, "set": true, "unset": true, "totp": true, "path": true, "db": true, "telegram": true},
+		"config":   {"init": true, "site": true, "show": true, "get": true, "set": true, "unset": true, "totp": true, "path": true, "db": true, "telegram": true, "dingtalk": true},
 		"vault":    {"init": true, "status": true, "passwd": true, "migrate": true},
 		"session":  {"open": true, "wait": true, "list": true, "close": true},
 		"telegram": {"targets": true, "send": true, "read": true},
@@ -82,8 +82,10 @@ func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 	totpSub := map[string]bool{"init": true, "code": true, "status": true, "on": true, "off": true}
 	dbSub := map[string]bool{"add": true, "list": true, "remove": true}
 	telegramSub := map[string]bool{"add": true, "list": true, "remove": true}
+	dingtalkSub := map[string]bool{"group": true}
+	dingtalkGroupSub := map[string]bool{"add": true, "list": true, "remove": true}
 	// a word of a command may hold a hyphen (`archery run-sql`, `archery workflow-status`)
-	cmd := regexp.MustCompile("(?m)(?:^|[`$] *|\\| )securl ((?:[a-z]+)(?: [a-z][a-z-]*)?(?: [a-z]+)?)")
+	cmd := regexp.MustCompile("(?m)(?:^|[`$] *|\\| )securl ((?:[a-z]+)(?: [a-z][a-z-]*)?(?: [a-z]+)?(?: [a-z]+)?)")
 	for _, m := range cmd.FindAllStringSubmatch(readSkill(t), -1) {
 		w := strings.Fields(m[1])
 		if !known[w[0]] {
@@ -103,6 +105,12 @@ func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 		}
 		if w[0] == "config" && len(w) > 2 && w[1] == "telegram" && !telegramSub[w[2]] {
 			t.Errorf("`securl %s`: no such telegram command", m[1])
+		}
+		if w[0] == "config" && len(w) > 2 && w[1] == "dingtalk" && !dingtalkSub[w[2]] {
+			t.Errorf("`securl %s`: no such dingtalk command (it is `securl config dingtalk group ...`)", m[1])
+		}
+		if w[0] == "config" && len(w) > 3 && w[1] == "dingtalk" && w[2] == "group" && !dingtalkGroupSub[w[3]] {
+			t.Errorf("`securl %s`: no such dingtalk group command", m[1])
 		}
 	}
 }
@@ -396,6 +404,8 @@ func TestEveryFieldTheSkillNamesIsOneTheToolsTake(t *testing.T) {
 		"statement_timeout": true, "ddl_disabled": true, "sql_error": true,
 		// error codes of the Telegram tools: held to the source by TestTheErrorCodesTheSkillNamesAreOnesTheServerSends
 		"chat_not_writable": true, "chat_not_readable": true, "chat_not_reachable": true, "webhook_set": true, "reader_conflict": true, "text_too_long": true,
+		// error codes of the DingTalk group tools: held to the source by the same test
+		"refused_by_robot": true, "content_refused": true,
 		// Values of a database target's mode.
 		"read_only": true, "read_write": true,
 		// Parameters of the sites' own APIs, used as examples of what goes into `query`.

@@ -85,6 +85,7 @@ var sensitiveCalls = map[string]map[string]any{
 	"session_close":           {"all": true},
 	"telegram_send":           {"bot": "ops", "chat": "alerts", "text": "x"},
 	"telegram_read":           {"bot": "ops", "chat": "alerts"},
+	"dingtalk_send":           {"group": "ops", "text": "x"},
 }
 
 func TestSensitiveToolsRefuseWhileTheVaultIsNotInitialized(t *testing.T) {
@@ -138,6 +139,7 @@ func TestARefusedCallContactsNothing(t *testing.T) {
 func TestOnlyStaticToolsWorkWhileLocked(t *testing.T) {
 	g := gateServer(t, "locked", func(c *config.Config) {
 		c.Telegram.Bots = []config.TelegramBot{{Name: "ops", Chats: []config.TelegramChat{{Name: "alerts", ChatID: -1001111111111}}}}
+		c.DingTalk.Groups = []config.DingTalkGroup{{Name: "ops"}}
 	})
 	if out, isErr := g.call(t, "site_list", map[string]any{}); isErr || out["sites"] == nil {
 		t.Errorf("site_list lists drivers, nothing secret: %v %v", isErr, out)
@@ -150,6 +152,12 @@ func TestOnlyStaticToolsWorkWhileLocked(t *testing.T) {
 		t.Errorf("telegram_targets lists the configured bots: %v %v", isErr, out)
 	} else if strings.Contains(fmt.Sprint(out), "has_session:true") {
 		t.Errorf("a locked vault cannot say which bots have a token: %v", out)
+	}
+	// and dingtalk_targets is the same kind of tool again
+	if out, isErr := g.call(t, "dingtalk_targets", map[string]any{}); isErr || len(fmt.Sprint(out["groups"])) < 10 {
+		t.Errorf("dingtalk_targets lists the configured groups: %v %v", isErr, out)
+	} else if strings.Contains(fmt.Sprint(out), "has_session:true") {
+		t.Errorf("a locked vault cannot say which groups have a webhook: %v", out)
 	}
 	if out, isErr := g.call(t, "db_targets", map[string]any{}); isErr || out["targets"] == nil {
 		t.Errorf("db_targets lists the configured targets: %v %v", isErr, out)

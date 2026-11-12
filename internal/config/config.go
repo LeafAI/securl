@@ -189,6 +189,9 @@ func (c *Config) Validate() error {
 	if err := c.Telegram.validate(); err != nil {
 		return err
 	}
+	if err := validateDingTalkGroups(c.DingTalk.Groups); err != nil {
+		return err
+	}
 	if t := c.Security.LinkTOTP; t.Enabled {
 		windows := int((c.Web.TTL+t.Period-1)/t.Period) + 1 // every window the link's life can touch
 		if windows > totp.MaxCandidates || windows > seal.MaxLinkSlots {
@@ -227,6 +230,9 @@ type DingTalk struct {
 	Secret  string   `yaml:"secret"`
 	Keyword string   `yaml:"keyword"` // required keyword of the robot's security settings, if any
 	Mobiles []string `yaml:"at_mobiles"`
+	// Groups are the groups an agent may speak in (dingtalk_send), each through a custom robot of its own whose webhook a person types
+	// on a page. They have nothing to do with the robot above, which carries login links to the person.
+	Groups []DingTalkGroup `yaml:"groups"`
 }
 
 type Tunnel struct {

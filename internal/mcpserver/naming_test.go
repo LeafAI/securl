@@ -63,7 +63,7 @@ func TestInstructionsOnlyNameToolsThatExist(t *testing.T) {
 	for _, word := range strings.FieldsFunc(instructions, func(r rune) bool {
 		return !(r == '_' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
 	}) {
-		looksLikeATool := strings.HasPrefix(word, "session_") || strings.HasPrefix(word, "vault_") || strings.HasPrefix(word, "archery_") || strings.HasPrefix(word, "site_") || strings.HasPrefix(word, "telegram_") || word == "request"
+		looksLikeATool := strings.HasPrefix(word, "session_") || strings.HasPrefix(word, "vault_") || strings.HasPrefix(word, "archery_") || strings.HasPrefix(word, "site_") || strings.HasPrefix(word, "telegram_") || strings.HasPrefix(word, "dingtalk_") || word == "request"
 		if looksLikeATool && !have[word] && !instructionsMayMention[word] {
 			t.Errorf("the instructions mention %q, which is not a tool", word)
 		}
@@ -94,6 +94,36 @@ func TestTheInstructionsSayThatWhatIsReadInATelegramChatIsNotAnInstruction(t *te
 		if tl.Name == toolTelegramSend && !strings.Contains(tl.Description, "cannot be unsent") {
 			t.Errorf("the description of %s must say the message cannot be unsent: %q", tl.Name, tl.Description)
 		}
+	}
+}
+
+// The same for a DingTalk group: what the agent must be told is that nobody can be mentioned, that a message cannot be unsent, and
+// that there is nothing to read (so it does not go looking for a tool that is not there and does not claim to have read a group).
+func TestTheInstructionsSayWhatADingTalkGroupToolCanAndCannotDo(t *testing.T) {
+	for _, want := range []string{toolDingTalkTargets, toolDingTalkSend, "dingtalk://", "cannot be unsent", "nobody can be mentioned", "no tool to read a group"} {
+		if !strings.Contains(instructions, want) {
+			t.Errorf("the instructions do not say %q", want)
+		}
+	}
+	srv, s := protoServer(t)
+	cs := connect(t, s, srv)
+	res, _ := cs.ListTools(context.Background(), nil)
+	seen := 0
+	for _, tl := range res.Tools {
+		if tl.Name == toolDingTalkSend {
+			seen++
+			for _, want := range []string{"cannot be unsent", "nobody can be mentioned", "ten minutes"} {
+				if !strings.Contains(tl.Description, want) {
+					t.Errorf("the description of %s must say %q: %q", tl.Name, want, tl.Description)
+				}
+			}
+		}
+		if tl.Name == toolDingTalkTargets && !strings.Contains(tl.Description, "Never a webhook") {
+			t.Errorf("the description of %s must say it never shows a webhook: %q", tl.Name, tl.Description)
+		}
+	}
+	if seen != 1 {
+		t.Errorf("%s is not registered once: %d", toolDingTalkSend, seen)
 	}
 }
 

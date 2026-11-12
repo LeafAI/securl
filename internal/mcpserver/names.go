@@ -18,6 +18,8 @@ const (
 	toolTelegramTargets = "telegram_targets" // the bots and chats the owner has made reachable
 	toolTelegramSend    = "telegram_send"    // say something in a chat
 	toolTelegramRead    = "telegram_read"    // read what was said in a chat
+	toolDingTalkTargets = "dingtalk_targets" // the DingTalk groups the owner has made reachable
+	toolDingTalkSend    = "dingtalk_send"    // say something in a DingTalk group
 	toolVaultStatus     = "vault_status"
 	toolVaultUnlock     = "vault_unlock"
 

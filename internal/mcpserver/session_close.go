@@ -15,6 +15,7 @@ import (
 
 	"github.com/LeafAI/securl/internal/audit"
 	"github.com/LeafAI/securl/internal/dbsite"
+	"github.com/LeafAI/securl/internal/dingtalksite"
 	"github.com/LeafAI/securl/internal/flow"
 	"github.com/LeafAI/securl/internal/keyring"
 	"github.com/LeafAI/securl/internal/ratelimit"
@@ -128,6 +129,12 @@ func (s *Server) scopeOf(c *core, in LogoutInput) (closeScope, *ToolError) {
 		base = b
 	} else if strings.HasPrefix(strings.ToLower(in.URL), telegramsite.Scheme+":") {
 		_, b, terr := s.telegramTarget(in.URL)
+		if terr != nil {
+			return closeScope{}, terr
+		}
+		base = b
+	} else if strings.HasPrefix(strings.ToLower(in.URL), dingtalksite.Scheme+":") {
+		_, b, terr := s.dingtalkTarget(in.URL)
 		if terr != nil {
 			return closeScope{}, terr
 		}
@@ -339,12 +346,21 @@ func closeDetail(keys []string) string {
 			bots++
 		}
 	}
+	var hooks int
+	for _, n := range names {
+		if strings.HasPrefix(n, dingtalksite.Scheme+"://") {
+			hooks++
+		}
+	}
 	d := fmt.Sprintf("closes %d saved session(s), which forgets the login: %s.", len(names), strings.Join(names, ", "))
 	if dbs > 0 {
 		d += fmt.Sprintf(" %d of them are database targets (db://): the account and password a person typed for a database is not kept anywhere else and cannot be recovered, it must be typed again.", dbs)
 	}
 	if bots > 0 {
 		d += fmt.Sprintf(" %d of them are Telegram bots (telegram://): the bot token a person typed is not kept anywhere else, and must be typed again (BotFather can show it again).", bots)
+	}
+	if hooks > 0 {
+		d += fmt.Sprintf(" %d of them are DingTalk groups (dingtalk://): the robot webhook a person typed is not kept anywhere else, and must be pasted again from the robot's settings in DingTalk.", hooks)
 	}
 	return d
 }
