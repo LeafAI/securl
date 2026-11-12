@@ -208,6 +208,16 @@ func num(v any) int64 {
 	return 0
 }
 
+// clampLimit is the number of updates a getUpdates call may return: 1 to 100, and 100 for anything else (none given, negative, or
+// out of range), as the real API does. The bound is applied to the 64-bit number before it is made an int, so that a huge value is
+// never cut down to a small one by the conversion.
+func clampLimit(n int64) int {
+	if n <= 0 || n > 100 {
+		return 100
+	}
+	return int(n)
+}
+
 func (a *API) sendMessage(w http.ResponseWriter, b *Bot, args map[string]any) {
 	chat := num(args["chat_id"])
 	text, _ := args["text"].(string)
@@ -247,10 +257,7 @@ func (a *API) getUpdates(w http.ResponseWriter, token string, args map[string]an
 		}
 		a.updates[token] = keep
 	}
-	limit := int(num(args["limit"]))
-	if limit <= 0 || limit > 100 {
-		limit = 100
-	}
+	limit := clampLimit(num(args["limit"]))
 	out := []map[string]any{}
 	for _, u := range a.updates[token] {
 		if len(out) == limit {
