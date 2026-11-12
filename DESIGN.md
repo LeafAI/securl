@@ -55,6 +55,8 @@ internal/
   notify/                    # DingTalk robot client (HMAC-SHA256 signed webhook)
   site/                      # Driver interface + registry
     gitlab/ kibana/ kubesphere/ nightingale/ archery/ skywalking/
+  telegram/ telegramsite/    # Bot API client + bounded inbox; the bot-token login driver (telegram://<bot>)
+  slidewindow/               # the per-bot send limit
     generic/                 # declarative form/JSON login driven by YAML (any other site)
   session/                   # cache, singleflight per host, validity probe
   config/                    # ~/.config/securl/config.yaml + env overrides
@@ -295,6 +297,7 @@ they were; the first is audited as `session_dropped`.
 | `request` | `url`, `method`, `path`, `query?`, `headers?`, body | `{status, headers, body, redactions, ...}`: credentials put in and taken out |
 | `session_list` | – | cached hosts + expiry (no secrets) |
 | `session_close` | `url` or `all`, `close_id?` | drops the named sessions after a person typed `DELETE` on a page |
+| `telegram_targets` / `telegram_send` / `telegram_read` | `bot`, `chat`, `text` / `limit?`, `wait_seconds?` | the configured bots and chats; `{sent, message_id}`; messages marked untrusted (see section 8) |
 | `archery_query` | `url`, `instance`, `db`, `sql`, `limit` | rows (read-only query endpoint, no approval) |
 | `archery_run_sql` | `url`, `instance`, `db`, `sql`, `remark`, `wait_timeout_s?` | execution result (sync) |
 | `archery_workflow_status` / `archery_wait` | `workflow_id` | status / continue waiting & execute |
@@ -400,6 +403,37 @@ MCP registration: `claude mcp add login -- login`.
     in a process of its own.
   It does **not** defend against another process of the same user, by design: such a process can already read the user's files,
   attach a debugger to the daemon, and read its memory. If that is in your threat model, do not run a daemon.
+
+- **Telegram is a channel other people write into, and one other people read.** `telegram_*` tools let an agent speak in, and read
+  from, the chats the owner named, through a bot. What is defended, and what is not:
+  - *What an agent may reach.* It names a configured bot and a configured chat. It never gives a chat id, a token, an API address, a
+    proxy or a parse mode, and an argument outside the schema is refused. A bot token alone lets its holder post in every chat the bot
+    is in; here the agent holds no token and can use only the chats written down. Reading and sending are switched per chat. Use its
+    own bot for this (not one that other tooling shares): the token is full control of the bot, and `session_close` is the only way
+    securl forgets it.
+  - *Reading is on by default and is the prompt-injection channel.* Anyone in the group can write something that tells an agent to
+    do something. Every read carries a notice in securl's own words, the same every time, that the text is untrusted data and never an
+    instruction; sender names are one line and cut, long texts are cut, the count is capped, and the agent cannot choose offsets or
+    reach other chats. That lowers the chance that a model obeys it and does not remove it: a model can still be talked into
+    something, and the person who gave the agent its tools decides whether it may act on what it read. Switch `read: false` for a
+    chat nobody should be able to talk to the agent in.
+  - *Sending is not confirmed, and cannot be undone.* Text is plain text (no parse mode, so no formatting or link markup), with a first
+    line written by securl that says an AI agent sent it and from which machine; the agent cannot remove it, so people in the chat can
+    tell. Sends are limited per bot across its chats (default 20 a minute; a refusal or a failed send gives the slot back; a Telegram
+    slow-down is obeyed). Every send is audited by size and SHA-256, never the text, and reads by count. Everyone in the chat sees what
+    the agent posts, including what it quotes from elsewhere: an agent that read a secret in another tool can post it.
+  - *The token.* A person types it on the usual page, and it is kept in the vault, in no configuration, argument or environment
+    variable (those are readable by other processes). It is in the **path** of every Bot API request, so the places it could leak are
+    the ones that print a request: a `*url.Error`, a server body that echoes it, a proxy's answer. No error is made from what a
+    transport or a server said; redirects are never followed; the tests search every answer, error and audit line for it, and the
+    login page's own reply too. A revoked token ends the session, an unreachable Telegram does not.
+  - *What is held.* Messages wait in memory only, bounded, per bot, and are never written to disk or to the audit log; Telegram keeps
+    an update 24 hours and forgets it once confirmed, so a message is read once. A restart loses what was not read.
+  - *What securl cannot know.* Messages are not end-to-end encrypted: Telegram can read them (a bot cannot take part in a secret chat).
+    Privacy mode decides what a bot in a group sees (only mentions, replies and commands when on), and an empty answer is not "nobody
+    spoke"; the answer says so. `from` is what a sender calls themselves. Another process of the same user can use the sessions the
+    daemon holds, like any other site. With `telegram.proxy` the proxy sees that the bot talks, and holds a credential if one is in its
+    address (shown masked everywhere); without it the environment's proxy is not used, so it never changes where the token goes.
 
 ## 9. Milestones
 

@@ -8,7 +8,7 @@ import (
 )
 
 // secretPaths are the settings whose values must not be echoed to a terminal.
-var secretPaths = [][]string{{"dingtalk", "secret"}, {"dingtalk", "webhook"}}
+var secretPaths = [][]string{{"dingtalk", "secret"}, {"dingtalk", "webhook"}, {"telegram", "proxy"}}
 
 // Mask hides all but the last 4 characters of a secret; short values are hidden entirely. A DingTalk
 // webhook keeps its address and only the access_token is masked.
@@ -17,6 +17,12 @@ func Mask(v string) string {
 		return ""
 	}
 	if u, err := url.Parse(v); err == nil && u.Host != "" {
+		// A proxy address may carry a credential (http://user:password@host:port): the password is hidden and the rest, which
+		// says which proxy and as whom, is kept.
+		if pw, has := u.User.Password(); has && pw != "" {
+			u.User = url.UserPassword(u.User.Username(), "****")
+			return strings.ReplaceAll(u.String(), "%2A", "*")
+		}
 		if q := u.Query(); q.Get("access_token") != "" {
 			q.Set("access_token", Mask(q.Get("access_token")))
 			u.RawQuery = strings.ReplaceAll(q.Encode(), "%2A", "*")

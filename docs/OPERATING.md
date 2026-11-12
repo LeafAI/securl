@@ -322,6 +322,32 @@ account. A server that cannot be reached is `site_unreachable`; a refused accoun
 session. A host on this machine needs `security.allow_local_addresses: true`. A server certificate that cannot be verified
 needs the right CA on this machine, or (knowing what it gives up) `tls: skip-verify`.
 
+### Telegram: letting an agent talk in a group
+
+An agent can send to, and read from, chats you name, through a bot. It never gets the bot's token and never chooses a chat.
+
+1. **Make a bot of its own.** In Telegram, talk to `@BotFather`: `/newbot`, keep the token it gives. Use a bot made for this: whoever
+   holds the token controls the bot.
+2. **Put it in the group** (it need not be an admin). To let it read all messages and not only mentions, replies and commands, turn
+   privacy off: `@BotFather`, `/setprivacy`, pick the bot, `Disable`, then take the bot out of the group and add it again (Telegram
+   applies the setting only to a new membership). With privacy on, `telegram_read` still works and says it sees only part.
+3. **Find the chat id.** Write a message in the group and open
+   `https://api.telegram.org/bot<token>/getUpdates` in a browser (a group's id is negative, like `-1001234567890`), and do not paste
+   that address anywhere else. The token is in it, so clear it from the browser's history afterwards (or use a private window).
+4. **Tell securl.** `securl config telegram add` (guided) or
+   `securl config telegram add --name ops --chat alerts=-1001234567890`; it never asks for the token. Write `alerts=-1001234567890:read` to let
+   the agent only read that chat, `:send` to let it only send. `securl config telegram list|remove` manage them.
+5. **Type the token once.** The agent calls `session_open` with `telegram://ops`; you get the usual link and type the token on the
+   page. securl asks Telegram who the bot is, and keeps the token in the vault. `session_close` with the same URL forgets it, after
+   you confirm.
+6. **If Telegram is not reachable directly,** set a proxy: `securl config set telegram.proxy http://127.0.0.1:1080` (http, https or
+   socks5; a user and password may be part of it and are never shown). `SECURL_TELEGRAM_PROXY` does the same for one run.
+   `securl doctor` says whether `api.telegram.org` can be reached, and with which proxy.
+
+Things to know: the group sees what the agent posts, behind a line that says an AI agent sent it; reads are marked untrusted because
+anyone in the group can write to the agent; `send_limit` (20 a minute by default) is per bot; and no message text is in the audit
+log (`grep telegram audit.jsonl` shows the bot, the chat, sizes and hashes).
+
 ## 8. Not supported (yet)
 
 GitLab reCAPTCHA after repeated failures; WebAuthn/passkey-only accounts; Jenkins 2FA plugins; any TOTP on Kibana

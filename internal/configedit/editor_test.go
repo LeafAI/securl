@@ -425,3 +425,129 @@ func TestValidateBuildsOAuth2Sites(t *testing.T) {
 		t.Errorf("an idp over http must be refused before saving: %v", err)
 	}
 }
+
+func TestTelegramBotsAreWrittenReplacedAndRemovedKeepingComments(t *testing.T) {
+	p := write(t, "# my config\ndingtalk:\n  webhook: https://oapi.dingtalk.com/robot/send?access_token=abc # robot\n")
+	e, _ := Open(p)
+	f := false
+	b := config.TelegramBot{Name: "ops", Chats: []config.TelegramChat{
+		{Name: "alerts", ChatID: -1001234567890},
+		{Name: "dev", ChatID: -1009876543210, Read: &f},
+	}}
+	if err := e.SetTelegramBot(b); err != nil {
+		t.Fatal(err)
+	}
+	b.Chats = append(b.Chats, config.TelegramChat{Name: "me", ChatID: 123456789, Send: &f})
+	if err := e.SetTelegramBot(b); err != nil { // same name: replaced, not duplicated
+		t.Fatal(err)
+	}
+	if err := e.Save(); err != nil {
+		t.Fatal(err)
+	}
+	c := reload(t, p)
+	if len(c.Telegram.Bots) != 1 || len(c.Telegram.Bots[0].Chats) != 3 {
+		t.Fatalf("%+v", c.Telegram)
+	}
+	got := c.Telegram.Bots[0].Chats
+	if got[0].ChatID != -1001234567890 || got[1].CanRead() || !got[1].CanSend() || got[2].CanSend() || !got[2].CanRead() {
+		t.Errorf("read and send survive a round trip: %+v", got)
+	}
+	raw, _ := os.ReadFile(p)
+	s := string(raw)
+	if !strings.Contains(s, "# my config") || !strings.Contains(s, "# robot") {
+		t.Errorf("comments must survive:\n%s", s)
+	}
+	if strings.Contains(s, "send_limit") || strings.Contains(s, "read_messages") || strings.Contains(s, "send_window") {
+		t.Errorf("defaults are not written, so the program can change them later:\n%s", s)
+	}
+	// the fixture's own DingTalk webhook has an access_token; what is checked is the telegram section
+	tg := s[strings.Index(s, "telegram:"):]
+	for _, key := range []string{"token", "secret", "password", "bot_token"} {
+		if strings.Contains(tg, key) {
+			t.Errorf("the telegram section must hold no token (%s):\n%s", key, tg)
+		}
+	}
+	e2, _ := Open(p)
+	got2, err := e2.TelegramBots()
+	if err != nil || len(got2) != 1 {
+		t.Fatalf("%v %v", got2, err)
+	}
+	if !e2.RemoveTelegramBot("ops") || e2.RemoveTelegramBot("ops") {
+		t.Fatal("RemoveTelegramBot should succeed once")
+	}
+	if err := e2.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(p); strings.Contains(string(raw), "telegram:") {
+		t.Errorf("an empty telegram section is not left behind:\n%s", raw)
+	}
+}
+
+func TestTheTelegramProxyIsASettingLikeAnyOtherAndItsCredentialIsMasked(t *testing.T) {
+	p := write(t, "")
+	e, _ := Open(p)
+	if err := e.Set("telegram.proxy", "http://user:pa55word@127.0.0.1:1080"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if c := reload(t, p); c.Telegram.Proxy != "http://user:pa55word@127.0.0.1:1080" {
+		t.Errorf("%q", c.Telegram.Proxy)
+	}
+	shown, err := e2show(t, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !IsSecret("telegram.proxy") {
+		t.Error("the proxy may carry a credential, so it is a secret setting: config get and config set do not echo it")
+	}
+	if got := Mask("http://user:pa55word@127.0.0.1:1080"); strings.Contains(got, "pa55word") {
+		t.Errorf("Mask leaks the proxy's credential: %q", got)
+	}
+	if strings.Contains(shown, "pa55word") {
+		t.Errorf("config show prints the proxy's credential:\n%s", shown)
+	}
+	if !strings.Contains(shown, "127.0.0.1:1080") {
+		t.Errorf("but still says which proxy:\n%s", shown)
+	}
+	e3, _ := Open(p)
+	if err := e3.Set("telegram.proxy", "ftp://x"); err == nil {
+		if err := e3.Save(); err == nil {
+			t.Error("a proxy that is not http, https or socks5 is refused, at the latest when it is saved")
+		}
+	}
+	if c := reload(t, p); c.Telegram.Proxy != "http://user:pa55word@127.0.0.1:1080" {
+		t.Errorf("the refused value did not reach the file: %q", c.Telegram.Proxy)
+	}
+}
+
+func e2show(t *testing.T, path string) (string, error) {
+	t.Helper()
+	e, err := Open(path)
+	if err != nil {
+		return "", err
+	}
+	b, err := e.Redacted()
+	return string(b), err
+}
+
+func TestAProxyCredentialIsMaskedWhateverTheSchemeAndAHostOnlyProxyIsLeftAlone(t *testing.T) {
+	for _, in := range []string{"http://user:pa55word@127.0.0.1:1080", "socks5://u:pa55word@proxy.example:1080", "https://u:pa55word@p.example"} {
+		got := Mask(in)
+		if strings.Contains(got, "pa55word") {
+			t.Errorf("%q leaks: %q", in, got)
+		}
+		if !strings.Contains(got, "@") || !strings.Contains(got, "u") {
+			t.Errorf("what is shown still says which proxy and which user: %q", got)
+		}
+	}
+	for _, in := range []string{"http://127.0.0.1:1080", "http://onlyuser@127.0.0.1:1080", ""} {
+		if got := Mask(in); got != in && in != "" && !strings.Contains(got, "****") {
+			t.Errorf("a proxy with no password has nothing to hide: %q -> %q", in, got)
+		}
+	}
+	if Mask("https://x.example/send?access_token=abcdefgh1234") == "https://x.example/send?access_token=abcdefgh1234" {
+		t.Error("the existing masking still works")
+	}
+}

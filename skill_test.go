@@ -66,20 +66,22 @@ func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 	known := map[string]bool{
 		"config": true, "vault": true, "doctor": true, "page": true, "version": true,
 		// the tools, as commands
-		"session": true, "site": true, "db": true, "archery": true, "request": true, "serve": true, "daemon": true, "unlock": true,
+		"session": true, "site": true, "db": true, "archery": true, "telegram": true, "request": true, "serve": true, "daemon": true, "unlock": true,
 	}
 	sub := map[string]map[string]bool{
-		"config":  {"init": true, "site": true, "show": true, "get": true, "set": true, "unset": true, "totp": true, "path": true, "db": true},
-		"vault":   {"init": true, "status": true, "passwd": true, "migrate": true},
-		"session": {"open": true, "wait": true, "list": true, "close": true},
-		"site":    {"list": true},
-		"daemon":  {"status": true, "install": true, "uninstall": true},
-		"db":      {"targets": true, "query": true, "exec": true},
-		"archery": {"instances": true, "groups": true, "query": true, "run-sql": true, "wait": true, "workflow-status": true, "cancel": true},
+		"config":   {"init": true, "site": true, "show": true, "get": true, "set": true, "unset": true, "totp": true, "path": true, "db": true, "telegram": true},
+		"vault":    {"init": true, "status": true, "passwd": true, "migrate": true},
+		"session":  {"open": true, "wait": true, "list": true, "close": true},
+		"telegram": {"targets": true, "send": true, "read": true},
+		"site":     {"list": true},
+		"daemon":   {"status": true, "install": true, "uninstall": true},
+		"db":       {"targets": true, "query": true, "exec": true},
+		"archery":  {"instances": true, "groups": true, "query": true, "run-sql": true, "wait": true, "workflow-status": true, "cancel": true},
 	}
 	siteSub := map[string]bool{"add": true, "custom": true, "list": true, "remove": true}
 	totpSub := map[string]bool{"init": true, "code": true, "status": true, "on": true, "off": true}
 	dbSub := map[string]bool{"add": true, "list": true, "remove": true}
+	telegramSub := map[string]bool{"add": true, "list": true, "remove": true}
 	// a word of a command may hold a hyphen (`archery run-sql`, `archery workflow-status`)
 	cmd := regexp.MustCompile("(?m)(?:^|[`$] *|\\| )securl ((?:[a-z]+)(?: [a-z][a-z-]*)?(?: [a-z]+)?)")
 	for _, m := range cmd.FindAllStringSubmatch(readSkill(t), -1) {
@@ -99,6 +101,9 @@ func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 		if w[0] == "config" && len(w) > 2 && w[1] == "db" && !dbSub[w[2]] {
 			t.Errorf("`securl %s`: no such db command", m[1])
 		}
+		if w[0] == "config" && len(w) > 2 && w[1] == "telegram" && !telegramSub[w[2]] {
+			t.Errorf("`securl %s`: no such telegram command", m[1])
+		}
 	}
 }
 
@@ -113,11 +118,19 @@ func keys(m map[string]bool) []string {
 // A setting named in the skill with `securl config set <key>` must be one the program accepts, or the person gets an
 // error on the first thing the skill told them to do.
 func TestEverySettingTheSkillSetsExists(t *testing.T) {
-	b, err := os.ReadFile("internal/config/config.go")
-	if err != nil {
-		t.Fatal(err)
+	// the configuration is more than one file: the sections that are large have their own (database.go, telegram.go)
+	var src string
+	files, _ := filepath.Glob("internal/config/*.go")
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src += string(b)
 	}
-	src := string(b)
 	// The key is section.name; for aliases and roots the part after the section is a host name, which has dots of its
 	// own, so only the first two segments are checked. For the maps (aliases, roots, site_options) the section is.
 	set := regexp.MustCompile("securl config (?:set|get|unset) ([a-z_]+(?:\\.[a-z_<>]+)+)")
@@ -348,17 +361,30 @@ func TestUpdateHasTheSameTwoWaysAndWarnsAboutTheVault(t *testing.T) {
 // An argument the skill names for a tool must be a field that tool takes. The names are read from the input types, so
 // a renamed or misspelt field in the skill fails here instead of being refused by the server in front of the user.
 func TestEveryFieldTheSkillNamesIsOneTheToolsTake(t *testing.T) {
-	b, err := os.ReadFile("internal/mcpserver/types.go")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// the tools' inputs and outputs are in types.go and in the files of the tool families that have their own (telegram_types.go)
 	fields := map[string]bool{}
-	for _, m := range regexp.MustCompile("`json:\"([a-z_]+)[,\"]").FindAllStringSubmatch(string(b), -1) {
-		fields[m[1]] = true
+	typeFiles, _ := filepath.Glob("internal/mcpserver/*types.go")
+	for _, f := range typeFiles {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range regexp.MustCompile("`json:\"([a-z_]+)[,\"]").FindAllStringSubmatch(string(b), -1) {
+			fields[m[1]] = true
+		}
 	}
-	cfg, err := os.ReadFile("internal/config/config.go")
-	if err != nil {
-		t.Fatal(err)
+	// and the configuration is more than one file: the large sections have their own (database.go, telegram.go)
+	var cfg []byte
+	cfgFiles, _ := filepath.Glob("internal/config/*.go")
+	for _, f := range cfgFiles {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg = append(cfg, b...)
 	}
 	// Words in backticks that are not arguments: states, values, answers, and error codes.
 	notArgs := map[string]bool{
@@ -368,6 +394,8 @@ func TestEveryFieldTheSkillNamesIsOneTheToolsTake(t *testing.T) {
 		"vault_not_initialized": true, "session_expired": true, "site_unreachable": true, "request_not_allowed": true,
 		"unknown_target": true, "database_not_allowed": true, "target_read_only": true, "not_read_only": true, "too_many_rows": true,
 		"statement_timeout": true, "ddl_disabled": true, "sql_error": true,
+		// error codes of the Telegram tools: held to the source by TestTheErrorCodesTheSkillNamesAreOnesTheServerSends
+		"chat_not_writable": true, "chat_not_readable": true, "chat_not_reachable": true, "webhook_set": true, "reader_conflict": true, "text_too_long": true,
 		// Values of a database target's mode.
 		"read_only": true, "read_write": true,
 		// Parameters of the sites' own APIs, used as examples of what goes into `query`.

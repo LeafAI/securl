@@ -340,3 +340,96 @@ func TestDoctorSaysHowTheLinkReachesThePerson(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorSaysNothingAboutTelegramWhenNoneIsConfigured(t *testing.T) {
+	// t.TempDir() is named after the test, which has the word in it, so the paths are taken out before the output is searched
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	os.WriteFile(cfgPath, []byte("limits: {per_site: 3}\n"), 0o600)
+	out, _ := capture(t, func() int { return runDoctor([]string{"-config", cfgPath}) })
+	out = strings.ReplaceAll(out, dir, "<dir>")
+	if strings.Contains(strings.ToLower(out), "telegram") {
+		t.Errorf("a setup with no bot has nothing to say about Telegram:\n%s", out)
+	}
+}
+
+func TestDoctorReportsEachTelegramBotByNameAndNeverAChatIdOrAToken(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	os.WriteFile(cfgPath, []byte("telegram:\n  proxy: http://user:pa55word@127.0.0.1:1080\n  bots:\n    - name: ops\n      chats:\n        - {name: alerts, chat_id: -1001234567890}\n        - {name: me, chat_id: 123456789, send: false}\n"), 0o600)
+	out, _ := capture(t, func() int { return runDoctor([]string{"-config", cfgPath}) })
+	for _, want := range []string{"telegram bot ops", "2 chats", "1 can be sent to", "127.0.0.1:1080"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("doctor lacks %q:\n%s", want, out)
+		}
+	}
+	for _, secret := range []string{"pa55word", "-1001234567890", "123456789", "AAH"} {
+		if strings.Contains(out, secret) {
+			t.Errorf("doctor prints %q:\n%s", secret, out)
+		}
+	}
+}
+
+// -telegram checks that api.telegram.org can be reached the way securl will reach it (through the proxy, if one is set). It needs
+// no token: doctor never asks for the vault passphrase, so it cannot check one, and says so.
+func TestDoctorTelegramChecksReachabilityThroughTheProxyAndSaysItCannotCheckTheToken(t *testing.T) {
+	var viaProxy int
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		viaProxy++
+		w.WriteHeader(404) // Telegram answers 404 to a path it does not know, and that is an answer: the host is reachable
+		w.Write([]byte(`{"ok":false,"error_code":404,"description":"Not Found"}`))
+	}))
+	defer proxy.Close()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	os.WriteFile(cfgPath, []byte("security: {allow_local_addresses: true}\ntelegram:\n  proxy: "+proxy.URL+"\n  bots:\n    - {name: ops, chats: [{name: a, chat_id: 1}]}\n"), 0o600)
+	out, _ := capture(t, func() int { return runDoctor([]string{"-config", cfgPath, "-telegram"}) })
+	if viaProxy == 0 {
+		t.Errorf("the check did not go through the proxy:\n%s", out)
+	}
+	if !strings.Contains(out, "[ok  ] telegram api") {
+		t.Errorf("an answer from Telegram's side is reachability:\n%s", out)
+	}
+	// the line about reachability itself (not the bot's line, which also mentions the token) says what is and is not checked
+	var reach string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "telegram api") {
+			reach = l
+		}
+	}
+	if !strings.Contains(reach, "token") || !strings.Contains(reach, "unlock") || !strings.Contains(reach, "session_open telegram://") {
+		t.Errorf("the reachability line says that the token is checked when a person logs in, not here, and how:\n%s", reach)
+	}
+}
+
+func TestDoctorTelegramFailsAndSaysWhatToDoWhenTheProxyIsDown(t *testing.T) {
+	dead := httptest.NewServer(http.NotFoundHandler())
+	addr := dead.URL
+	dead.Close()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	os.WriteFile(cfgPath, []byte("security: {allow_local_addresses: true}\ntelegram:\n  proxy: http://user:pa55word@"+strings.TrimPrefix(addr, "http://")+"\n  bots:\n    - {name: ops, chats: [{name: a, chat_id: 1}]}\n"), 0o600)
+	out, code := capture(t, func() int { return runDoctor([]string{"-config", cfgPath, "-telegram"}) })
+	if code == 0 || !strings.Contains(out, "[FAIL] telegram api") {
+		t.Errorf("a proxy that is down is a failure (exit %d):\n%s", code, out)
+	}
+	if !strings.Contains(out, "telegram.proxy") {
+		t.Errorf("it names the setting:\n%s", out)
+	}
+	if strings.Contains(out, "pa55word") {
+		t.Errorf("the proxy's credential is printed:\n%s", out)
+	}
+}
+
+func TestDoctorWithoutTheTelegramFlagMakesNoRequestToTelegram(t *testing.T) {
+	var hits int
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++ }))
+	defer proxy.Close()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	os.WriteFile(cfgPath, []byte("telegram:\n  proxy: "+proxy.URL+"\n  bots:\n    - {name: ops, chats: [{name: a, chat_id: 1}]}\n"), 0o600)
+	capture(t, func() int { return runDoctor([]string{"-config", cfgPath}) })
+	if hits != 0 {
+		t.Errorf("doctor without -telegram reached out %d times", hits)
+	}
+}

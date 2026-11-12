@@ -44,7 +44,9 @@ type Config struct {
 	OAuth2Sites []oauth2flow.Spec `yaml:"oauth2_sites"`
 	// Databases lists the PostgreSQL and MySQL databases an agent may run SQL against (non-production only).
 	Databases []Database `yaml:"databases"`
-	Daemon    Daemon     `yaml:"daemon"`
+	// Telegram lists the bots, and the chats of each, that an agent may send to and read from.
+	Telegram Telegram `yaml:"telegram"`
+	Daemon   Daemon   `yaml:"daemon"`
 }
 
 // Daemon configures `securl daemon`, the long-running process the command-line commands talk to.
@@ -184,6 +186,9 @@ func (c *Config) Validate() error {
 	if err := c.validateOAuth2Sites(); err != nil {
 		return err
 	}
+	if err := c.Telegram.validate(); err != nil {
+		return err
+	}
 	if t := c.Security.LinkTOTP; t.Enabled {
 		windows := int((c.Web.TTL+t.Period-1)/t.Period) + 1 // every window the link's life can touch
 		if windows > totp.MaxCandidates || windows > seal.MaxLinkSlots {
@@ -311,6 +316,7 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv(envTunnelOrder); v != "" {
 		c.Tunnel.Order = strings.Split(v, ",")
 	}
+	c.applyTelegramEnv(os.Getenv)
 }
 
 func (t *TOTP) applyDefaults(period time.Duration, secretFile string) {
