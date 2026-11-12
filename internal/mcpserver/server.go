@@ -59,6 +59,9 @@ type Options struct {
 	// talks to api.telegram.org, through the proxy in the configuration if there is one.
 	TelegramAPI  string
 	TelegramHTTP *http.Client
+	// DingTalkAPI and DingTalkHTTP point the DingTalk group tools at another endpoint (a test's fake). The product leaves them empty.
+	DingTalkAPI  string
+	DingTalkHTTP *http.Client
 }
 
 type Server struct {
@@ -77,6 +80,9 @@ type Server struct {
 	// telegramAPI and telegramHTTP are where a test points the Telegram tools at a fake Bot API; the product leaves them empty.
 	telegramAPI  string
 	telegramHTTP *http.Client
+	// dingtalkAPI and dingtalkHTTP are where a test points the DingTalk group tools at a fake endpoint; the product leaves them empty.
+	dingtalkAPI  string
+	dingtalkHTTP *http.Client
 
 	mu       sync.Mutex
 	core     *core     // nil while the vault is locked
@@ -93,7 +99,8 @@ type core struct {
 
 	closer *closer // asks a person before saved sessions are closed
 
-	telegram *telegramBots // what each Telegram bot has been told and has sent; it ends with the vault being open
+	telegram *telegramBots   // what each Telegram bot has been told and has sent; it ends with the vault being open
+	dingtalk *dingtalkGroups // the send window of each DingTalk group; it ends with the vault being open
 
 	linkTOTP, sealTOTP bool // which TOTP factors are on (reported by the policy resource; never their secrets)
 }
@@ -108,7 +115,7 @@ func New(cfg *config.Config, opt Options) (*mcp.Server, *Server, error) {
 	}
 	origin, originErr := notify.LocalOrigin()
 	s := &Server{cfg: cfg, hc: opt.HTTP, log: opt.Log, db: realDB{}, fresh: freshnessOf(opt.SessionFreshness), origin: origin,
-		telegramAPI: opt.TelegramAPI, telegramHTTP: opt.TelegramHTTP}
+		telegramAPI: opt.TelegramAPI, telegramHTTP: opt.TelegramHTTP, dingtalkAPI: opt.DingTalkAPI, dingtalkHTTP: opt.DingTalkHTTP}
 	if s.hc == nil {
 		s.hc = netguard.New(netguard.Policy{AllowLocal: cfg.Security.AllowLocalAddresses, AllowedHosts: cfg.Security.AllowedHosts})
 	}
@@ -271,6 +278,14 @@ func (s *Server) register(m *mcp.Server) error {
 		func() error {
 			return addTool(m, s.observe, spec[TelegramSendOutput]{toolTelegramSend, "Send a message to a Telegram chat",
 				"Send a plain-text message to a chat the owner has named, as the bot. Needs a session: call " + toolSessionOpen + " with url telegram://<bot> first (a person types the bot's token). securl puts a line first that says an AI agent sent it and from which machine; you cannot change it. A message cannot be unsent: send only what the user asked you to say. Each send is audited (target and size, never the text) and limited per bot.", open(false)}, s.telegramSend)
+		},
+		func() error {
+			return addTool(m, s.observe, spec[DingTalkTargetsOutput]{toolDingTalkTargets, "List DingTalk groups",
+				"List the DingTalk groups the owner has made reachable: their names and whether a person has typed the group robot's webhook. Never a webhook or a token: you name a group, you do not supply an address.", ro}, s.dingtalkTargets)
+		},
+		func() error {
+			return addTool(m, s.observe, spec[DingTalkSendOutput]{toolDingTalkSend, "Send a message to a DingTalk group",
+				"Send a plain-text message to a group the owner has named, as that group's robot. Needs a session: call " + toolSessionOpen + " with url dingtalk://<group> first (a person types the robot's webhook). securl puts a line first that says an AI agent sent it and from which machine; you cannot change it, and nobody can be mentioned. A message cannot be unsent: send only what the user asked you to say. Each send is audited (group and size, never the text) and limited per group; DingTalk throttles a robot for ten minutes if it is flooded.", open(false)}, s.dingtalkSend)
 		},
 		func() error {
 			return addTool(m, s.observe, spec[TelegramReadOutput]{toolTelegramRead, "Read messages from a Telegram chat",

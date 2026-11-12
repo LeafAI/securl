@@ -347,6 +347,95 @@ func (e *Editor) RemoveTelegramBot(name string) bool {
 	return false
 }
 
+// dingtalkGroupEntry is how a group is written: only what the owner chose, and no webhook or secret of any kind (a person pastes
+// those on a page and they live in the vault).
+type dingtalkGroupEntry struct {
+	Name       string `yaml:"name"`
+	Sign       bool   `yaml:"sign,omitempty"`
+	Keyword    string `yaml:"keyword,omitempty"`
+	SendLimit  int    `yaml:"send_limit,omitempty"`
+	SendWindow string `yaml:"send_window,omitempty"`
+}
+
+func dingtalkEntryOf(g config.DingTalkGroup) dingtalkGroupEntry {
+	e := dingtalkGroupEntry{Name: g.Name, Sign: g.Sign, Keyword: g.Keyword, SendLimit: g.SendMax}
+	if g.SendPeriod > 0 {
+		e.SendWindow = g.SendPeriod.String()
+	}
+	return e
+}
+
+// DingTalkGroups returns the DingTalk groups defined in the file, as written.
+func (e *Editor) DingTalkGroups() ([]config.DingTalkGroup, error) {
+	d := mapGet(e.root, "dingtalk")
+	if d == nil {
+		return nil, nil
+	}
+	n := mapGet(d, "groups")
+	if n == nil {
+		return nil, nil
+	}
+	var out []config.DingTalkGroup
+	if err := n.Decode(&out); err != nil {
+		return nil, fmt.Errorf("dingtalk.groups: %w", err)
+	}
+	return out, nil
+}
+
+// SetDingTalkGroup adds or replaces (by name) a group. It never writes a webhook or a secret: a person pastes those on the login page.
+// The robot that carries login links, in the same section, is left as it is.
+func (e *Editor) SetDingTalkGroup(g config.DingTalkGroup) error {
+	var node yaml.Node
+	if err := node.Encode(dingtalkEntryOf(g)); err != nil {
+		return fmt.Errorf("encode dingtalk group %s: %w", g.Name, err)
+	}
+	d := mapGet(e.root, "dingtalk")
+	if d == nil || d.Kind != yaml.MappingNode {
+		d = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		mapSet(e.root, "dingtalk", d)
+	}
+	seq := mapGet(d, "groups")
+	if seq == nil || seq.Kind != yaml.SequenceNode {
+		seq = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		mapSet(d, "groups", seq)
+	}
+	for i, c := range seq.Content {
+		if m := mapGet(c, "name"); m != nil && m.Value == g.Name {
+			node.HeadComment = c.HeadComment
+			seq.Content[i] = &node
+			return nil
+		}
+	}
+	seq.Content = append(seq.Content, &node)
+	return nil
+}
+
+// RemoveDingTalkGroup deletes a group by name, and the groups list too when nothing is left in it. The dingtalk section goes only if
+// the login robot is not in it.
+func (e *Editor) RemoveDingTalkGroup(name string) bool {
+	d := mapGet(e.root, "dingtalk")
+	if d == nil {
+		return false
+	}
+	seq := mapGet(d, "groups")
+	if seq == nil {
+		return false
+	}
+	for i, c := range seq.Content {
+		if m := mapGet(c, "name"); m != nil && m.Value == name {
+			seq.Content = append(seq.Content[:i], seq.Content[i+1:]...)
+			if len(seq.Content) == 0 {
+				mapDelete(d, "groups")
+			}
+			if len(d.Content) == 0 {
+				mapDelete(e.root, "dingtalk")
+			}
+			return true
+		}
+	}
+	return false
+}
+
 // Databases returns the database targets defined in the file, as written (defaults are not filled in).
 func (e *Editor) Databases() ([]config.Database, error) {
 	n := mapGet(e.root, "databases")

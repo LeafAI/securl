@@ -13,6 +13,7 @@ import (
 
 	"github.com/LeafAI/securl/internal/config"
 	"github.com/LeafAI/securl/internal/dbsite"
+	"github.com/LeafAI/securl/internal/dingtalksite"
 	"github.com/LeafAI/securl/internal/flow"
 	"github.com/LeafAI/securl/internal/netguard"
 	"github.com/LeafAI/securl/internal/notify"
@@ -78,6 +79,11 @@ func (s *Server) ensureLogin(ctx context.Context, req *mcp.CallToolRequest, raw,
 			return nil, terr
 		}
 		d = s.telegramDriver()
+	} else if strings.HasPrefix(strings.ToLower(raw), dingtalksite.Scheme+":") {
+		if _, base, terr = s.dingtalkTarget(raw); terr != nil {
+			return nil, terr
+		}
+		d = s.dingtalkDriver()
 	} else {
 		var err error
 		if base, terr = baseOf(raw); terr != nil {

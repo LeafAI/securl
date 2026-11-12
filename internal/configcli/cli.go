@@ -46,6 +46,9 @@ const usage = `usage: securl config <command> [-config file]
   telegram add [flags]       guided setup of one Telegram bot and the chats an agent may use, or give the answers as flags
   telegram list              show configured bots and chats
   telegram remove <name>     forget a Telegram bot
+  dingtalk group add [flags] guided setup of one DingTalk group an agent may send to (its robot's webhook is pasted by a person, never here)
+  dingtalk group list        show configured groups
+  dingtalk group remove <name>  forget a group
   show                       print the configuration (secrets are masked)
   get <key>                  print one setting         (-reveal shows secrets)
   set [key [value]]          change one setting; without arguments lists every setting
@@ -85,6 +88,8 @@ func Run(args []string, env Env) int {
 		err = cmdDB(env, rest)
 	case "telegram":
 		err = cmdTelegram(env, rest)
+	case "dingtalk":
+		err = cmdDingTalk(env, rest)
 	default:
 		fmt.Fprintf(env.Err, "securl config: unknown command %q\n\n%s\n", cmd, usage)
 		return 2

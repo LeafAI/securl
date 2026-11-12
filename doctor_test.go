@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/LeafAI/securl/internal/config"
@@ -431,5 +432,142 @@ func TestDoctorWithoutTheTelegramFlagMakesNoRequestToTelegram(t *testing.T) {
 	capture(t, func() int { return runDoctor([]string{"-config", cfgPath}) })
 	if hits != 0 {
 		t.Errorf("doctor without -telegram reached out %d times", hits)
+	}
+}
+
+func TestDoctorSaysNothingAboutDingTalkGroupsWhenNoneIsConfigured(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	os.WriteFile(cfgPath, []byte("dingtalk:\n  webhook: https://oapi.dingtalk.com/robot/send?access_token=abc\n"), 0o600)
+	out, _ := capture(t, func() int { return runDoctor([]string{"-config", cfgPath}) })
+	out = strings.ReplaceAll(out, dir, "<dir>")
+	if strings.Contains(out, "dingtalk group") {
+		t.Errorf("a setup with no group has nothing to say about groups:\n%s", out)
+	}
+}
+
+func TestDoctorReportsEachDingTalkGroupByNameWithItsLimitsAndNeverAWebhook(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	os.WriteFile(cfgPath, []byte("dingtalk:\n  webhook: https://oapi.dingtalk.com/robot/send?access_token=LOGINSECRETTOKEN\n  secret: SECLOGINSECRET\n  groups:\n    - {name: ops}\n    - {name: alerts, sign: true, keyword: deploy, send_limit: 5, send_window: 2m}\n"), 0o600)
+	out, _ := capture(t, func() int { return runDoctor([]string{"-config", cfgPath}) })
+	for _, want := range []string{"dingtalk group ops", "dingtalk group alerts", "at most 10 messages per 1m0s", "at most 5 messages per 2m0s", "signs", "a person pastes"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("doctor lacks %q:\n%s", want, out)
+		}
+	}
+	for _, secret := range []string{"LOGINSECRETTOKEN", "SECLOGINSECRET", "access_token"} {
+		if strings.Contains(out, secret) {
+			t.Errorf("doctor prints %q:\n%s", secret, out)
+		}
+	}
+	var ops string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "dingtalk group ops") {
+			ops = l
+		}
+	}
+	if strings.Contains(ops, "signs") {
+		t.Errorf("a group that does not sign does not say it does: %s", ops)
+	}
+}
+
+// -dingtalk-groups checks that oapi.dingtalk.com can be reached with no token and nothing to post.
+func TestDoctorDingTalkChecksReachabilityAndSaysItCannotCheckTheWebhook(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Write([]byte(`{"errcode":300005,"errmsg":"token is not exist"}`))
+	}))
+	defer srv.Close()
+	oldBase, oldHTTP := doctorDingTalkBase, doctorDingTalkHTTP
+	doctorDingTalkBase, doctorDingTalkHTTP = srv.URL, srv.Client()
+	defer func() { doctorDingTalkBase, doctorDingTalkHTTP = oldBase, oldHTTP }()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	os.WriteFile(cfgPath, []byte("dingtalk:\n  groups:\n    - {name: ops}\n"), 0o600)
+	// the exit code is not asserted: a test machine has no vault and no login robot, which doctor reports as failures of their own
+	out, _ := capture(t, func() int { return runDoctor([]string{"-config", cfgPath, "-dingtalk-groups"}) })
+	if hits.Load() != 1 {
+		t.Errorf("one request, no more: %d\n%s", hits.Load(), out)
+	}
+	if !strings.Contains(out, "[ok  ] dingtalk api") || strings.Contains(out, "[FAIL] dingtalk api") {
+		t.Errorf("an answer from DingTalk's side is reachability:\n%s", out)
+	}
+	var reach string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "dingtalk api") {
+			reach = l
+		}
+	}
+	if !strings.Contains(reach, "webhook") || !strings.Contains(reach, "first send") {
+		t.Errorf("the line says the webhook cannot be checked and when it is found out:\n%s", reach)
+	}
+}
+
+func TestDoctorDingTalkFailsAndSaysWhatToDoWhenItCannotBeReached(t *testing.T) {
+	dead := httptest.NewTLSServer(http.NotFoundHandler())
+	addr := dead.URL
+	dead.Close()
+	old := doctorDingTalkBase
+	doctorDingTalkBase = addr
+	defer func() { doctorDingTalkBase = old }()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	os.WriteFile(cfgPath, []byte("dingtalk:\n  groups:\n    - {name: ops}\n"), 0o600)
+	out, _ := capture(t, func() int { return runDoctor([]string{"-config", cfgPath, "-dingtalk-groups"}) })
+	if !strings.Contains(out, "[FAIL] dingtalk api") {
+		t.Errorf("an endpoint that cannot be reached is a failure:\n%s", out)
+	}
+	if !strings.Contains(out, "network") {
+		t.Errorf("it says what to check:\n%s", out)
+	}
+}
+
+// A captive portal, a proxy that rewrites answers or a different service on the way answers in its own words: that is not DingTalk
+// being reachable, and doctor must say the network is not letting DingTalk through rather than that all is well.
+func TestDoctorDingTalkDoesNotCallAnAnswerThatIsNotDingTalksReachable(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("<html>Please sign in to the guest network</html>"))
+	}))
+	defer srv.Close()
+	oldBase, oldHTTP := doctorDingTalkBase, doctorDingTalkHTTP
+	doctorDingTalkBase, doctorDingTalkHTTP = srv.URL, srv.Client()
+	defer func() { doctorDingTalkBase, doctorDingTalkHTTP = oldBase, oldHTTP }()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	os.WriteFile(cfgPath, []byte("dingtalk:\n  groups:\n    - {name: ops}\n"), 0o600)
+	out, _ := capture(t, func() int { return runDoctor([]string{"-config", cfgPath, "-dingtalk-groups"}) })
+	if !strings.Contains(out, "[FAIL] dingtalk api") || !strings.Contains(out, "not as the robot API does") {
+		t.Errorf("%s", out)
+	}
+	if strings.Contains(out, "guest network") {
+		t.Errorf("doctor repeats what the host said:\n%s", out)
+	}
+}
+
+func TestDoctorWithoutTheDingTalkFlagMakesNoRequest(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1) }))
+	defer srv.Close()
+	old := doctorDingTalkBase
+	doctorDingTalkBase = srv.URL
+	defer func() { doctorDingTalkBase = old }()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	os.WriteFile(cfgPath, []byte("dingtalk:\n  groups:\n    - {name: ops}\n"), 0o600)
+	capture(t, func() int { return runDoctor([]string{"-config", cfgPath}) })
+	if hits.Load() != 0 {
+		t.Errorf("doctor without -dingtalk-groups reached out %d times", hits.Load())
+	}
+}
+
+func TestDoctorDingTalkWithNoGroupSaysSoInsteadOfCheckingNothing(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	os.WriteFile(cfgPath, []byte("limits: {per_site: 3}\n"), 0o600)
+	out, _ := capture(t, func() int { return runDoctor([]string{"-config", cfgPath, "-dingtalk-groups"}) })
+	if !strings.Contains(out, "[FAIL] dingtalk api") || !strings.Contains(out, "dingtalk group add") {
+		t.Errorf("asking for the check with no group is a failure that says how to add one:\n%s", out)
 	}
 }

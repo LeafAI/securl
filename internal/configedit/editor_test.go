@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LeafAI/securl/internal/config"
 	"github.com/LeafAI/securl/internal/site/generic"
@@ -549,5 +550,128 @@ func TestAProxyCredentialIsMaskedWhateverTheSchemeAndAHostOnlyProxyIsLeftAlone(t
 	}
 	if Mask("https://x.example/send?access_token=abcdefgh1234") == "https://x.example/send?access_token=abcdefgh1234" {
 		t.Error("the existing masking still works")
+	}
+}
+
+// The groups live in the same dingtalk: section as the robot that carries login links. Editing the one must never touch the other,
+// and removing the last group must leave that robot exactly where it was.
+func TestDingTalkGroupsAreWrittenReplacedAndRemovedWithoutTouchingTheLoginRobot(t *testing.T) {
+	const login = "# my config\ndingtalk:\n  webhook: https://oapi.dingtalk.com/robot/send?access_token=abc # login robot\n  secret: SECxyz\n  keyword: login\n"
+	p := write(t, login)
+	e, _ := Open(p)
+	g := config.DingTalkGroup{Name: "ops"}
+	if err := e.SetDingTalkGroup(g); err != nil {
+		t.Fatal(err)
+	}
+	g.Sign, g.Keyword = true, "deploy"
+	if err := e.SetDingTalkGroup(g); err != nil { // same name: replaced, not duplicated
+		t.Fatal(err)
+	}
+	if err := e.SetDingTalkGroup(config.DingTalkGroup{Name: "alerts", SendMax: 5, SendPeriod: 2 * time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Save(); err != nil {
+		t.Fatal(err)
+	}
+	c := reload(t, p)
+	if len(c.DingTalk.Groups) != 2 {
+		t.Fatalf("%+v", c.DingTalk.Groups)
+	}
+	ops, _ := c.DingTalkGroup("ops")
+	al, _ := c.DingTalkGroup("alerts")
+	if !ops.Sign || ops.Keyword != "deploy" || al.SendLimit() != 5 || al.SendWindow() != 2*time.Minute || al.Sign {
+		t.Errorf("%+v %+v", ops, al)
+	}
+	if c.DingTalk.Webhook == "" || c.DingTalk.Secret != "SECxyz" || c.DingTalk.Keyword != "login" {
+		t.Errorf("the login robot was touched: %+v", c.DingTalk)
+	}
+	raw, _ := os.ReadFile(p)
+	s := string(raw)
+	if !strings.Contains(s, "# my config") || !strings.Contains(s, "# login robot") {
+		t.Errorf("comments must survive:\n%s", s)
+	}
+	groups := s[strings.Index(s, "groups:"):]
+	for _, key := range []string{"webhook", "access_token", "secret", "token"} {
+		if strings.Contains(groups, key) {
+			t.Errorf("the groups hold no credential (%s):\n%s", key, groups)
+		}
+	}
+	if strings.Contains(groups, "send_limit: 0") || strings.Contains(groups, "sign: false") {
+		t.Errorf("defaults are not written:\n%s", groups)
+	}
+	e2, _ := Open(p)
+	got, err := e2.DingTalkGroups()
+	if err != nil || len(got) != 2 {
+		t.Fatalf("%v %v", got, err)
+	}
+	if !e2.RemoveDingTalkGroup("ops") || e2.RemoveDingTalkGroup("ops") {
+		t.Fatal("RemoveDingTalkGroup should succeed once")
+	}
+	if !e2.RemoveDingTalkGroup("alerts") {
+		t.Fatal("alerts")
+	}
+	if err := e2.Save(); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(p)
+	if strings.Contains(string(after), "groups") {
+		t.Errorf("an empty groups list is not left behind:\n%s", after)
+	}
+	if !strings.Contains(string(after), "access_token=abc") || !strings.Contains(string(after), "SECxyz") || !strings.Contains(string(after), "# login robot") {
+		t.Errorf("the login robot must be exactly where it was:\n%s", after)
+	}
+}
+
+func TestRemovingTheLastGroupOfAFileThatHasNothingElseRemovesTheSection(t *testing.T) {
+	p := write(t, "")
+	e, _ := Open(p)
+	e.SetDingTalkGroup(config.DingTalkGroup{Name: "ops"})
+	e.Save()
+	e2, _ := Open(p)
+	if !e2.RemoveDingTalkGroup("ops") {
+		t.Fatal("remove")
+	}
+	e2.Save()
+	if raw, _ := os.ReadFile(p); strings.Contains(string(raw), "dingtalk:") {
+		t.Errorf("an empty dingtalk section is not left behind:\n%s", raw)
+	}
+}
+
+func TestRemovingAGroupThatIsNotThereChangesNothing(t *testing.T) {
+	p := write(t, "dingtalk:\n  webhook: https://oapi.dingtalk.com/robot/send?access_token=abc\n")
+	e, _ := Open(p)
+	if e.RemoveDingTalkGroup("nope") {
+		t.Error("nothing to remove")
+	}
+	e.SetDingTalkGroup(config.DingTalkGroup{Name: "a"})
+	if e.RemoveDingTalkGroup("") || e.RemoveDingTalkGroup("A") || e.RemoveDingTalkGroup("a ") {
+		t.Error("only an exact name removes a group")
+	}
+}
+
+// A comment the owner wrote above a group is theirs: replacing the group (to change its limits) must not lose it.
+func TestReplacingAGroupKeepsTheCommentAboveIt(t *testing.T) {
+	p := write(t, "dingtalk:\n  groups:\n    # the on-call channel, ask Dana before changing\n    - name: ops\n")
+	e, _ := Open(p)
+	if err := e.SetDingTalkGroup(config.DingTalkGroup{Name: "ops", Sign: true}); err != nil {
+		t.Fatal(err)
+	}
+	e.Save()
+	if raw, _ := os.ReadFile(p); !strings.Contains(string(raw), "ask Dana before changing") {
+		t.Errorf("the comment was lost:\n%s", raw)
+	}
+}
+
+// groups are a list of mappings, not a setting `config set` can write as one value: they have their own command, which checks them.
+func TestDingTalkGroupsAreNotASettingThatConfigSetCanWrite(t *testing.T) {
+	for _, s := range Settings() {
+		if strings.HasPrefix(s.Path, "dingtalk.groups") {
+			t.Errorf("%s is listed as a setting", s.Path)
+		}
+	}
+	p := write(t, "")
+	e, _ := Open(p)
+	if err := e.Set("dingtalk.groups", "x"); err == nil {
+		t.Error("dingtalk.groups cannot be set as one value")
 	}
 }

@@ -34,6 +34,7 @@ func runDoctor(args []string) int {
 	siteURL := fs.String("site", "", "inspect a site (no credentials): picks the driver like the tools do and reports what it will do")
 	siteName := fs.String("site-name", "", "driver to use with -site (default: from aliases / the host name)")
 	doTelegram := fs.Bool("telegram", false, "check that api.telegram.org can be reached the way securl will reach it (through telegram.proxy, if set)")
+	doDingTalk := fs.Bool("dingtalk-groups", false, "check that oapi.dingtalk.com can be reached (no webhook is needed and nothing is posted)")
 	fs.Parse(args)
 
 	bad := 0
@@ -93,6 +94,7 @@ func runDoctor(args []string) int {
 		report(true, "tunnel providers", strings.Join(names, ", "))
 	}
 	doctorTelegram(cfg, report)
+	doctorDingTalkGroups(cfg, report)
 	doctorGuards(cfg, vstate, report)
 	if !cfg.Archery.DDLAllowed() {
 		fmt.Println("[note] archery.allow_ddl is false: DDL will be refused")
@@ -108,6 +110,9 @@ func runDoctor(args []string) int {
 	}
 	if *doTelegram {
 		doctorTelegramReach(ctx, cfg, report)
+	}
+	if *doDingTalk {
+		doctorDingTalkReach(ctx, cfg, report)
 	}
 	if *doSend {
 		d := &notify.DingTalk{Webhook: cfg.DingTalk.Webhook, Secret: cfg.DingTalk.Secret, Keyword: cfg.DingTalk.Keyword, Mobiles: cfg.DingTalk.Mobiles}
