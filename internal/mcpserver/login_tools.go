@@ -19,6 +19,7 @@ import (
 	"github.com/LeafAI/securl/internal/ratelimit"
 	"github.com/LeafAI/securl/internal/session"
 	"github.com/LeafAI/securl/internal/site"
+	"github.com/LeafAI/securl/internal/telegramsite"
 )
 
 func baseOf(raw string) (*url.URL, *ToolError) {
@@ -72,6 +73,11 @@ func (s *Server) ensureLogin(ctx context.Context, req *mcp.CallToolRequest, raw,
 			return nil, terr
 		}
 		d = s.openDriver()
+	} else if strings.HasPrefix(strings.ToLower(raw), telegramsite.Scheme+":") {
+		if _, base, terr = s.telegramTarget(raw); terr != nil {
+			return nil, terr
+		}
+		d = s.telegramDriver()
 	} else {
 		var err error
 		if base, terr = baseOf(raw); terr != nil {

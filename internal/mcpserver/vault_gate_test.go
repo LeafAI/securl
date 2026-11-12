@@ -83,6 +83,8 @@ var sensitiveCalls = map[string]map[string]any{
 	"archery_cancel":          {"url": "https://a.example", "workflow_id": 1},
 	"session_list":            {},
 	"session_close":           {"all": true},
+	"telegram_send":           {"bot": "ops", "chat": "alerts", "text": "x"},
+	"telegram_read":           {"bot": "ops", "chat": "alerts"},
 }
 
 func TestSensitiveToolsRefuseWhileTheVaultIsNotInitialized(t *testing.T) {
@@ -134,12 +136,21 @@ func TestARefusedCallContactsNothing(t *testing.T) {
 // an empty list would say "no sessions" when the vault is merely shut, and "removed 0" would hide that the stored
 // sessions are still there. Both say so instead.
 func TestOnlyStaticToolsWorkWhileLocked(t *testing.T) {
-	g := gateServer(t, "locked", nil)
+	g := gateServer(t, "locked", func(c *config.Config) {
+		c.Telegram.Bots = []config.TelegramBot{{Name: "ops", Chats: []config.TelegramChat{{Name: "alerts", ChatID: -1001111111111}}}}
+	})
 	if out, isErr := g.call(t, "site_list", map[string]any{}); isErr || out["sites"] == nil {
 		t.Errorf("site_list lists drivers, nothing secret: %v %v", isErr, out)
 	}
 	// db_targets lists what the owner configured; whether a target has an account is the vault's to say, so it is left out
 	// rather than answered as "none": a shut vault must not look like an empty one.
+	// telegram_targets is the same kind of tool as db_targets: what the owner configured, with whether a session exists left out
+	// while the vault is shut, not answered as "none".
+	if out, isErr := g.call(t, "telegram_targets", map[string]any{}); isErr || len(fmt.Sprint(out["bots"])) < 10 {
+		t.Errorf("telegram_targets lists the configured bots: %v %v", isErr, out)
+	} else if strings.Contains(fmt.Sprint(out), "has_session:true") {
+		t.Errorf("a locked vault cannot say which bots have a token: %v", out)
+	}
 	if out, isErr := g.call(t, "db_targets", map[string]any{}); isErr || out["targets"] == nil {
 		t.Errorf("db_targets lists the configured targets: %v %v", isErr, out)
 	} else if strings.Contains(fmt.Sprint(out), "has_session:true") {

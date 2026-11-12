@@ -307,6 +307,14 @@ exists only while a person is being asked.
   on, and tells the team in DingTalk afterwards. `environment: prod` is refused when the configuration loads. securl
   cannot know that a host is really not production, and an agent can read whatever the account can: give the account
   only what an agent may do there, and no `dblink`, `postgres_fdw` or `FEDERATED` route to a production server.
+- **Telegram** (`telegram:`) lets an agent speak in, and read from, the chats the owner names, through a bot. The agent names a bot
+  and a chat; it never supplies a chat id, a token, an address or a parse mode. The bot's token is typed by a person on the usual
+  page and kept in the vault, and it is in no answer, error, audit line or message (it is in the path of every Bot API request, so
+  no error is ever made from what a transport or a server said). Text goes out as plain text, with a first line that securl writes
+  and the agent cannot change, saying an AI agent sent it and from which machine; sends are limited per bot, not confirmed one by
+  one, and audited (size and hash, never the text). **What an agent reads there was written by other people**, and every read says so;
+  that lowers the risk of an instruction hidden in a group message and does not remove it. Reading is on by default and can be
+  switched off per chat (`read: false`). `docs`: DESIGN.md, "Threat model", says what is and is not defended.
 - `archery.allow_ddl: false` is enforced by a SQL scanner (comments, strings and `;` aware, MySQL executable
   comments included, `PREPARE`/`EXECUTE` refused, anything unparsable refused), not a pattern match.
 - Every secret securl keeps (logged-in sessions, TOTP secrets) is in one **vault**: AES-256-GCM under a random master
@@ -367,7 +375,8 @@ securl page [dir]             # writes the static login page for local use
 ## Configuration
 
 `~/.config/securl/config.yaml` (override with `-config`). Environment: `SECURL_DINGTALK_WEBHOOK`,
-`SECURL_DINGTALK_SECRET`, `SECURL_TUNNEL_ORDER`.
+`SECURL_DINGTALK_SECRET`, `SECURL_TUNNEL_ORDER`, `SECURL_TELEGRAM_PROXY`. A bot token has no variable, flag or setting: a secret in
+the environment is in every child process.
 
 ```yaml
 dingtalk:
@@ -412,6 +421,16 @@ databases:                   # PostgreSQL / MySQL for dev, test or staging; `sec
     # max_rows: 1000         # rows one query may return (at most 10000)
     # max_changed_rows: 1000 # a change that touches more rows is rolled back
     # statement_timeout: 30s # per statement (at most 5m)
+telegram:                    # bots an agent may talk through; `securl config telegram add` writes this
+  proxy: http://127.0.0.1:1080   # optional; reaches api.telegram.org (http, https or socks5; may carry user:password, never shown)
+  bots:
+    - name: ops              # what an agent calls it; the TOKEN is never here: a person types it at the first session_open
+      chats:                 # the only chats the agent can use; it names them, it never gives an id
+        - {name: alerts, chat_id: -1001234567890}
+        - {name: me, chat_id: 123456789, send: false}   # read: false / send: false switch one direction off
+      # send_limit: 20       # messages the bot sends per send_window, across all its chats
+      # send_window: 1m
+      # read_messages: 50    # what one read returns when the call gives no limit (at most 100)
 audit:
   enabled: true              # default; JSON lines (who/what/when, never secrets) in audit.jsonl next to this file
 limits:                      # protect people from request floods; only requests that reach a person count
@@ -454,7 +473,8 @@ Every tool has a title and an output schema. Read-only resources: `securl://site
 `securl://policy` (the limits that apply to the agent). The server also sends instructions on how to use the tools.
 
 `vault_status`, `vault_unlock`, `session_open`, `session_wait`, `site_list`, `session_list`, `session_close`, `archery_instances`, `archery_groups`, `archery_query`,
-`archery_run_sql`, `archery_wait`, `archery_workflow_status`, `archery_cancel`, `db_targets`, `db_query`, `db_exec`.
+`archery_run_sql`, `archery_wait`, `archery_workflow_status`, `archery_cancel`, `db_targets`, `db_query`, `db_exec`,
+`telegram_targets`, `telegram_send`, `telegram_read`.
 Long operations return a `pending` result with an id after `max_block_seconds`; resume with `session_wait` /
 `archery_wait`. `session_close` is one of them: it closes nothing until a person has typed `DELETE` on a page that names the
 sessions (a database account is a password that cannot be recovered), so it answers `pending` and is resumed with its `close_id`.
@@ -473,7 +493,7 @@ securl archery run-sql --url https://archery.corp.example --instance x --databas
 ```
 
 - Every command, by the tool it runs: `securl session open|wait|list|close`, `securl site list`, `securl request`, `securl db
-  targets|query|exec` and `securl archery instances|groups|query|run-sql|wait|workflow-status|cancel`. `securl session close`
+  targets|query|exec`, `securl telegram targets|send|read` and `securl archery instances|groups|query|run-sql|wait|workflow-status|cancel`. `securl session close`
   asks a person to confirm and waits for them. The flags of a command are `securl <group> <command> --help`. Besides the
   tools: `securl vault init|status|passwd|migrate`, `securl unlock`, `securl daemon` (and `status`, `install`, `uninstall`),
   `securl doctor`, `securl config ...`, `securl page [dir]` (write the login page to a directory, to host it yourself),

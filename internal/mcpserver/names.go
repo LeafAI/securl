@@ -6,17 +6,20 @@ package mcpserver
 // Every name that appears in a result's next_tool, in a hint or in the instructions comes from here, so a rename is a
 // change to this block and nothing can be left pointing at a tool that no longer exists.
 const (
-	toolSessionOpen  = "session_open"  // get a session for a site: asks a person to type the credential once
-	toolSessionWait  = "session_wait"  // keep waiting for a session that was asked for
-	toolSessionList  = "session_list"  // which sites have a session (never the credentials)
-	toolSessionClose = "session_close" // forget a session
-	toolRequest      = "request"       // send an HTTP request to a site with the session's credentials; they never reach the agent
-	toolSiteList     = "site_list"     // which sites securl can reach
-	toolDBTargets    = "db_targets"    // the databases the owner has made reachable
-	toolDBQuery      = "db_query"      // run one read-only statement on a database
-	toolDBExec       = "db_exec"       // change data on a database that takes changes
-	toolVaultStatus  = "vault_status"
-	toolVaultUnlock  = "vault_unlock"
+	toolSessionOpen     = "session_open"     // get a session for a site: asks a person to type the credential once
+	toolSessionWait     = "session_wait"     // keep waiting for a session that was asked for
+	toolSessionList     = "session_list"     // which sites have a session (never the credentials)
+	toolSessionClose    = "session_close"    // forget a session
+	toolRequest         = "request"          // send an HTTP request to a site with the session's credentials; they never reach the agent
+	toolSiteList        = "site_list"        // which sites securl can reach
+	toolDBTargets       = "db_targets"       // the databases the owner has made reachable
+	toolDBQuery         = "db_query"         // run one read-only statement on a database
+	toolDBExec          = "db_exec"          // change data on a database that takes changes
+	toolTelegramTargets = "telegram_targets" // the bots and chats the owner has made reachable
+	toolTelegramSend    = "telegram_send"    // say something in a chat
+	toolTelegramRead    = "telegram_read"    // read what was said in a chat
+	toolVaultStatus     = "vault_status"
+	toolVaultUnlock     = "vault_unlock"
 
 	nextSessionWait = toolSessionWait
 	nextArcheryWait = "archery_wait"

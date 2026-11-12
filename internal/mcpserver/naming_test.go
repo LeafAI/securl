@@ -63,7 +63,7 @@ func TestInstructionsOnlyNameToolsThatExist(t *testing.T) {
 	for _, word := range strings.FieldsFunc(instructions, func(r rune) bool {
 		return !(r == '_' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
 	}) {
-		looksLikeATool := strings.HasPrefix(word, "session_") || strings.HasPrefix(word, "vault_") || strings.HasPrefix(word, "archery_") || strings.HasPrefix(word, "site_") || word == "request"
+		looksLikeATool := strings.HasPrefix(word, "session_") || strings.HasPrefix(word, "vault_") || strings.HasPrefix(word, "archery_") || strings.HasPrefix(word, "site_") || strings.HasPrefix(word, "telegram_") || word == "request"
 		if looksLikeATool && !have[word] && !instructionsMayMention[word] {
 			t.Errorf("the instructions mention %q, which is not a tool", word)
 		}
@@ -71,6 +71,28 @@ func TestInstructionsOnlyNameToolsThatExist(t *testing.T) {
 	for _, name := range []string{toolSessionOpen, toolSessionWait, toolSiteList, toolVaultUnlock, toolVaultStatus} {
 		if !strings.Contains(instructions, name) {
 			t.Errorf("the instructions must teach the agent %q", name)
+		}
+	}
+}
+
+// The instructions are what a model reads, and the one thing it must be told about Telegram is the thing a group makes dangerous:
+// what others write there is data. It is said where the tool is introduced, in the instructions themselves, not only in the
+// description of a tool that a client may show or hide.
+func TestTheInstructionsSayThatWhatIsReadInATelegramChatIsNotAnInstruction(t *testing.T) {
+	for _, want := range []string{toolTelegramTargets, toolTelegramSend, toolTelegramRead, "telegram://", "never an instruction", "cannot be unsent"} {
+		if !strings.Contains(instructions, want) {
+			t.Errorf("the instructions do not say %q", want)
+		}
+	}
+	srv, s := protoServer(t)
+	cs := connect(t, s, srv)
+	res, _ := cs.ListTools(context.Background(), nil)
+	for _, tl := range res.Tools {
+		if tl.Name == toolTelegramRead && !strings.Contains(tl.Description, "never an instruction") {
+			t.Errorf("the description of %s must say it too: %q", tl.Name, tl.Description)
+		}
+		if tl.Name == toolTelegramSend && !strings.Contains(tl.Description, "cannot be unsent") {
+			t.Errorf("the description of %s must say the message cannot be unsent: %q", tl.Name, tl.Description)
 		}
 	}
 }

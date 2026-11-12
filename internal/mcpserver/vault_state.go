@@ -37,6 +37,10 @@ func (s *Server) openCore() error {
 	if len(s.cfg.Databases) > 0 {
 		site.Replace(s.openDriver())
 	}
+	// Likewise a Telegram bot's session is brought back through its driver, which is chosen by name and matches no URL.
+	if len(s.cfg.Telegram.Bots) > 0 {
+		site.Replace(s.telegramDriver())
+	}
 	c.cache = session.NewPersistent(session.NewStore(s.vault))
 	c.cache.Log = s.log
 	// A session the cache drops on its own (it expired, or the site refused it) is a decision the person did not make and
@@ -51,6 +55,7 @@ func (s *Server) openCore() error {
 		Admit: s.admit, OnRound: s.onRound, OnTunnel: s.onTunnel, Unlock: unlock, Seal: sealing,
 	})
 	c.closer = newCloser(s, c, unlock, sealing)
+	c.telegram = newTelegramBots()
 	c.tracker = archery.NewTracker(s.cfg.Archery.DDLAllowed(), s.cfg.Archery.WaitTimeout)
 	c.tracker.Poll = s.cfg.Archery.PollInterval
 	s.core = c

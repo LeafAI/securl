@@ -43,6 +43,9 @@ const usage = `usage: securl config <command> [-config file]
   db add [flags]             guided setup of one PostgreSQL or MySQL database (non-production), or give the answers as flags
   db list                    show configured databases
   db remove <name>           forget a database target
+  telegram add [flags]       guided setup of one Telegram bot and the chats an agent may use, or give the answers as flags
+  telegram list              show configured bots and chats
+  telegram remove <name>     forget a Telegram bot
   show                       print the configuration (secrets are masked)
   get <key>                  print one setting         (-reveal shows secrets)
   set [key [value]]          change one setting; without arguments lists every setting
@@ -80,6 +83,8 @@ func Run(args []string, env Env) int {
 		err = cmdTOTP(env, rest)
 	case "db":
 		err = cmdDB(env, rest)
+	case "telegram":
+		err = cmdTelegram(env, rest)
 	default:
 		fmt.Fprintf(env.Err, "securl config: unknown command %q\n\n%s\n", cmd, usage)
 		return 2

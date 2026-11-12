@@ -20,6 +20,7 @@ import (
 	"github.com/LeafAI/securl/internal/ratelimit"
 	"github.com/LeafAI/securl/internal/session"
 	"github.com/LeafAI/securl/internal/site"
+	"github.com/LeafAI/securl/internal/telegramsite"
 )
 
 // Closing a saved session forgets what a person typed. A database account in particular is a password that cannot be asked
@@ -121,6 +122,12 @@ func (s *Server) scopeOf(c *core, in LogoutInput) (closeScope, *ToolError) {
 	var base *url.URL
 	if strings.HasPrefix(strings.ToLower(in.URL), dbsite.Scheme+":") {
 		_, b, terr := s.databaseTarget(in.URL)
+		if terr != nil {
+			return closeScope{}, terr
+		}
+		base = b
+	} else if strings.HasPrefix(strings.ToLower(in.URL), telegramsite.Scheme+":") {
+		_, b, terr := s.telegramTarget(in.URL)
 		if terr != nil {
 			return closeScope{}, terr
 		}
@@ -326,9 +333,18 @@ func closeDetail(keys []string) string {
 			dbs++
 		}
 	}
+	var bots int
+	for _, n := range names {
+		if strings.HasPrefix(n, telegramsite.Scheme+"://") {
+			bots++
+		}
+	}
 	d := fmt.Sprintf("closes %d saved session(s), which forgets the login: %s.", len(names), strings.Join(names, ", "))
 	if dbs > 0 {
 		d += fmt.Sprintf(" %d of them are database targets (db://): the account and password a person typed for a database is not kept anywhere else and cannot be recovered, it must be typed again.", dbs)
+	}
+	if bots > 0 {
+		d += fmt.Sprintf(" %d of them are Telegram bots (telegram://): the bot token a person typed is not kept anywhere else, and must be typed again (BotFather can show it again).", bots)
 	}
 	return d
 }

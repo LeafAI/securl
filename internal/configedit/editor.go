@@ -243,6 +243,110 @@ func entryOf(d config.Database) databaseEntry {
 	return e
 }
 
+// telegramChatEntry and telegramBotEntry are how a bot is written: only what the owner chose, so that the limits stay the program's to
+// change, and no token of any kind (a person types it on a page and it lives in the vault).
+type telegramChatEntry struct {
+	Name   string `yaml:"name"`
+	ChatID int64  `yaml:"chat_id"`
+	Read   *bool  `yaml:"read,omitempty"`
+	Send   *bool  `yaml:"send,omitempty"`
+}
+
+type telegramBotEntry struct {
+	Name       string              `yaml:"name"`
+	Chats      []telegramChatEntry `yaml:"chats"`
+	SendLimit  int                 `yaml:"send_limit,omitempty"`
+	SendWindow string              `yaml:"send_window,omitempty"`
+	ReadCount  int                 `yaml:"read_messages,omitempty"`
+}
+
+func telegramEntryOf(b config.TelegramBot) telegramBotEntry {
+	e := telegramBotEntry{Name: b.Name, SendLimit: b.SendMax, ReadCount: b.ReadCount}
+	for _, c := range b.Chats {
+		ce := telegramChatEntry{Name: c.Name, ChatID: c.ChatID}
+		if c.Read != nil && !*c.Read {
+			ce.Read = c.Read // only a switch that was turned off is written: on is the default
+		}
+		if c.Send != nil && !*c.Send {
+			ce.Send = c.Send
+		}
+		e.Chats = append(e.Chats, ce)
+	}
+	if b.SendPeriod > 0 {
+		e.SendWindow = b.SendPeriod.String()
+	}
+	return e
+}
+
+// TelegramBots returns the Telegram bots defined in the file, as written.
+func (e *Editor) TelegramBots() ([]config.TelegramBot, error) {
+	t := mapGet(e.root, "telegram")
+	if t == nil {
+		return nil, nil
+	}
+	n := mapGet(t, "bots")
+	if n == nil {
+		return nil, nil
+	}
+	var out []config.TelegramBot
+	if err := n.Decode(&out); err != nil {
+		return nil, fmt.Errorf("telegram.bots: %w", err)
+	}
+	return out, nil
+}
+
+// SetTelegramBot adds or replaces (by name) a bot with its chats. It never writes a token: a person types that on the login page.
+func (e *Editor) SetTelegramBot(b config.TelegramBot) error {
+	var node yaml.Node
+	if err := node.Encode(telegramEntryOf(b)); err != nil {
+		return fmt.Errorf("encode telegram bot %s: %w", b.Name, err)
+	}
+	t := mapGet(e.root, "telegram")
+	if t == nil || t.Kind != yaml.MappingNode {
+		t = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		mapSet(e.root, "telegram", t)
+	}
+	seq := mapGet(t, "bots")
+	if seq == nil || seq.Kind != yaml.SequenceNode {
+		seq = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		mapSet(t, "bots", seq)
+	}
+	for i, c := range seq.Content {
+		if m := mapGet(c, "name"); m != nil && m.Value == b.Name {
+			node.HeadComment = c.HeadComment
+			seq.Content[i] = &node
+			return nil
+		}
+	}
+	seq.Content = append(seq.Content, &node)
+	return nil
+}
+
+// RemoveTelegramBot deletes a bot by name, and the telegram section too when nothing is left in it.
+func (e *Editor) RemoveTelegramBot(name string) bool {
+	t := mapGet(e.root, "telegram")
+	if t == nil {
+		return false
+	}
+	seq := mapGet(t, "bots")
+	if seq == nil {
+		return false
+	}
+	for i, c := range seq.Content {
+		if m := mapGet(c, "name"); m != nil && m.Value == name {
+			seq.Content = append(seq.Content[:i], seq.Content[i+1:]...)
+			if len(seq.Content) == 0 {
+				mapDelete(t, "bots")
+			}
+			if len(t.Content) == 0 {
+				mapDelete(e.root, "telegram")
+			}
+			return true
+		}
+	}
+	return false
+}
+
 // Databases returns the database targets defined in the file, as written (defaults are not filled in).
 func (e *Editor) Databases() ([]config.Database, error) {
 	n := mapGet(e.root, "databases")
