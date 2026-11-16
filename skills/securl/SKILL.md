@@ -285,6 +285,7 @@ securl doctor                          # everything should be [ok]; the vault sh
   never asked here:** a person types it when an agent opens `redis://<name>`; a server with no password takes a single space. Give the
   password only the rights an agent should have: it is the boundary that holds. `securl config redis list|remove <name>` show and
   forget targets. A write needs `--yes-allow-writes` as well as `--mode read_write`. Do not hand-write the `redis:` section.
+  `securl doctor -data-targets` checks that every Redis server and RocketMQ NameServer accepts a connection (nothing is sent).
 - **A RocketMQ cluster an agent may read:** `securl config rocketmq add` asks for the name, the NameServer address(es), the
   environment and the **topics** an agent may read (required: there is no wildcard and no "every topic"; the broker's own topics are
   refused). It can only **read** messages, never send one or change a topic, and reads never consume: nothing is acknowledged.
@@ -292,6 +293,8 @@ securl doctor                          # everything should be [ok]; the vault sh
   must be allowed to use it. `--max-body-bytes 0` returns only the metadata of a message, never its body. **The AccessKey and the
   SecretKey are never asked here:** a person types them when an agent opens `rocketmq://<name>`; give the key only a **subscribe**
   permission on those topics and that group. `securl config rocketmq list|remove <name>` show and forget targets.
+- **A running securl does not see a configuration change until it is restarted** (it reads the file once, at start). `securl config` says so
+  after each change. A restart locks the vault: the user unlocks again, and the saved sessions are kept.
 - `securl config show` prints the configuration with secrets masked. `securl config set` with no arguments lists every
   setting. Each change is checked before it is saved and the previous file is kept as `config.yaml.bak`.
 

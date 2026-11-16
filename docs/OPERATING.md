@@ -372,6 +372,14 @@ Things to know: the group sees what the agent posts, behind a line that says an 
 plain text, so links are not clickable markup; a robot's own security settings can refuse a message (`refused_by_robot`: only you can
 change them); and no message text is in the audit log (`grep dingtalk audit.jsonl` shows the group, sizes and hashes).
 
+### A changed configuration needs a restart
+
+A running securl (the MCP server, and `securl daemon`) reads its configuration **once, when it starts**. A change made with `securl config`
+or by editing the file does not reach a process that is already running, and nothing in that process says so: it looks as if the change
+had been ignored. `securl config` says this after every change it saves. Restart the process (a client that started the MCP server
+starts it again when it is stopped; `securl daemon uninstall` and `install`, or the login agent's restart, restart the daemon). **A restart
+locks the vault**, so a person unlocks again, and the sessions saved in the vault are kept.
+
 ### Redis: letting an agent read (and, if you allow it, change) a server
 
 An agent names a Redis target you wrote down; it never gives a host or a password. By default it can only **read**, with a short list of
@@ -383,6 +391,8 @@ commands (no `KEYS`, no scripts, no `CONFIG`, no `FLUSHALL`).
    `skip-verify` or `disable` (an ElastiCache or a Redis with no TLS). `--mode read_write` together with `--yes-allow-writes` lets the
    agent change data through `redis_exec`; the team is told in DingTalk each time (the command, never a key or a value).
    `--max-items`, `--max-reply-bytes` and `--command-timeout` bound what one command returns and how long it takes.
+   `--tls disable` is only for a server that has no TLS: **a server with TLS (an AWS ElastiCache with in-transit encryption, for one) does not
+   answer a plain connection, and the login then ends as "could not reach the server" and not as a wrong password.**
 2. **Type the password once.** The agent calls `session_open` with `redis://cache`; you get the usual link and type the password (a
    server with no password takes a single space). It is checked with `AUTH` and `PING` and kept in the vault. `session_close` with the same
    URL forgets it, after you confirm.
@@ -390,7 +400,9 @@ commands (no `KEYS`, no scripts, no `CONFIG`, no `FLUSHALL`).
    that holds. A Redis 6 ACL user limited to read commands on a key prefix is better than the default user. A host on this machine
    needs `security.allow_local_addresses: true`.
 
-`grep redis audit.jsonl` shows the target, the command name and how many arguments it had; never a key or a value.
+`securl doctor -data-targets` connects (TCP only, nothing sent, no password) to every Redis server and RocketMQ NameServer to check the
+network path; whether a password is right is only known when one is typed. `grep redis audit.jsonl` shows the target, the command name
+and how many arguments it had; never a key or a value.
 
 ### RocketMQ: letting an agent read messages
 

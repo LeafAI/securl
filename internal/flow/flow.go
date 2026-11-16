@@ -697,7 +697,10 @@ func (f *Flow) finish(sess *site.Session, err error) {
 		case errors.Is(err, site.ErrBadCredentials):
 			f.cur.SetStatus(api.StateFailed, "Wrong username or password.")
 			listening = true
-		case errors.Is(err, site.ErrLoginRejected), errors.Is(err, site.ErrUnreachable):
+		case errors.Is(err, site.ErrUnreachable):
+			f.cur.SetStatus(api.StateFailed, "securl could not reach the server, so nothing was checked: your input may well be right. Details were sent to the AI agent.")
+			listening = true
+		case errors.Is(err, site.ErrLoginRejected):
 			f.cur.SetStatus(api.StateFailed, "The site refused the login. Details were sent to the AI agent.")
 			listening = true
 		default:

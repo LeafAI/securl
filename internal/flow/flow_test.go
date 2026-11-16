@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LeafAI/securl/internal/api"
 	"github.com/LeafAI/securl/internal/keyring"
 	"github.com/LeafAI/securl/internal/site"
 )
@@ -1710,4 +1711,54 @@ func TestDrainDoesNotWaitForAFlowThatIsStillWaitingForAPerson(t *testing.T) {
 		t.Errorf("Drain waited for a person: that is Close's job, took %s", time.Since(start))
 	}
 	m.Close()
+}
+
+// What the person sees on the page when a login ends must say what happened. A server that could not be reached says nothing about
+// the input: telling a person "the site refused the login" sends them to retype a password that was never checked.
+func TestThePageSaysWhetherTheSiteRefusedOrCouldNotBeReached(t *testing.T) {
+	cases := map[string]struct {
+		err       error
+		want, not string
+	}{
+		"unreachable": {fmt.Errorf("%w: it did not answer", site.ErrUnreachable), "could not reach the server", "refused"},
+		"refused":     {fmt.Errorf("%w: no", site.ErrLoginRejected), "The site refused the login", "could not reach"},
+		"bad":         {site.ErrBadCredentials, "Wrong username or password", "could not reach"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			m := NewManager(Config{Keys: keyring.NewMemoryPool(8, time.Hour), Notifier: okNotifier{}, Tunnels: &trackedTunnels{},
+				PageURL: "https://page.example/", TTL: time.Minute, Grace: time.Hour, OutcomeCap: time.Hour})
+			u, _ := url.Parse("https://site.example")
+			f := m.Start(afterRoundDriver{result: c.err}, u, "", http.DefaultClient, nil)
+			<-f.Done()
+			got := f.cur.Status()
+			if got.State != api.StateFailed || !strings.Contains(got.Message, c.want) || strings.Contains(got.Message, c.not) {
+				t.Errorf("%+v", got)
+			}
+		})
+	}
+}
+
+// A person who is looking at the page must be able to read why the login failed, so the tunnel stays up until the page has read it,
+// for every ending the person caused with their input, and for a server that could not be reached as for one that refused.
+func TestTheTunnelStaysUpForThePageToReadAnUnreachableServerToo(t *testing.T) {
+	for name, err := range map[string]error{"unreachable": site.ErrUnreachable, "refused": site.ErrLoginRejected} {
+		t.Run(name, func(t *testing.T) {
+			ts := &trackedTunnels{}
+			m := NewManager(Config{Keys: keyring.NewMemoryPool(8, time.Hour), Notifier: okNotifier{}, Tunnels: ts,
+				PageURL: "https://page.example/", TTL: time.Minute, Grace: time.Hour, OutcomeCap: time.Hour, FlushDelay: 50 * time.Millisecond})
+			u, _ := url.Parse("https://site.example")
+			f := m.Start(afterRoundDriver{result: err}, u, "", http.DefaultClient, nil)
+			<-f.Done()
+			if ts.stillOpen() != 1 {
+				t.Fatalf("the page has not read the outcome yet and the tunnel is already gone: open=%d", ts.stillOpen())
+			}
+			resp, gerr := http.Get(fmt.Sprintf("http://127.0.0.1:%d/%s/status", f.port, f.cur.Token))
+			if gerr != nil {
+				t.Fatal(gerr)
+			}
+			resp.Body.Close()
+			waitFor(t, "the tunnel to close once the outcome was read", func() bool { return ts.stillOpen() == 0 })
+		})
+	}
 }

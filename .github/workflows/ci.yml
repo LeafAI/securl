@@ -57,10 +57,9 @@ jobs:
           sleep 3
           PGPASSWORD=rootpw psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -f scripts/dbtest/postgres.sql
           mysql -h 127.0.0.1 -uroot -prootpw appdb < scripts/dbtest/mysql.sql
-      # Two real Redis servers (one with no password, one with): the loopback only, a fixed public test password.
+      # Real Redis (one with no password, one with) and a real RocketMQ with ACL on: the loopback only, fixed public test accounts.
       - name: Start Redis
         run: scripts/redistest/up.sh
-      # A real RocketMQ with ACL on: the loopback only, fixed public test accounts.
       - name: Start RocketMQ
         run: scripts/rmqtest/up.sh
       - run: test -z "$(gofmt -l .)"

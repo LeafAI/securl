@@ -154,8 +154,13 @@ func commit(env Env, ed *configedit.Editor) error {
 		return err
 	}
 	fmt.Fprintf(env.Out, "saved %s\n", ed.Path())
+	fmt.Fprintln(env.Out, restartNote)
 	return nil
 }
+
+// restartNote is said after every saved change: a running securl reads its configuration once, when it starts, so a change does not
+// reach a server or a daemon that is already running. Without this, a changed setting looks as if it had been ignored.
+const restartNote = "note: a securl that is already running keeps the configuration it started with; restart it (the MCP server, and `securl daemon` if you run one) for this change to apply. A restart locks the vault."
 
 // semanticCheck reuses the server's own start-up validation so mistakes surface now, not when an agent runs.
 func semanticCheck(ed *configedit.Editor) error {
