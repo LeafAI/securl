@@ -236,6 +236,9 @@ func (c *Client) call(ctx context.Context, addr string, code int, ext map[string
 	if err != nil {
 		return header{}, nil, ErrProtocol
 	}
+	if len(h) > maxHeader {
+		return header{}, nil, ErrProtocol // a request is a few fields: one this large is a bug, and it is not sized from
+	}
 	frame := make([]byte, 8, 8+len(h))
 	binary.BigEndian.PutUint32(frame, uint32(4+len(h)))
 	binary.BigEndian.PutUint32(frame[4:], uint32(len(h))) // serialization type 0: JSON

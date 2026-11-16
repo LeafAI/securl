@@ -467,3 +467,94 @@ func TestALimitAboveWhatTheOwnerAllowsIsCappedAtWhatTheOwnerAllows(t *testing.T)
 		t.Errorf("a smaller limit is honoured: %v", out)
 	}
 }
+
+// A queue is read from its end back as far as the limit, so a queue that holds more than the limit has older messages that were not
+// read. Truncated says so even when the messages that came back are not more than the limit, which is the case when only one queue
+// has messages (a broker's producer may put every message in one queue). Without it "these are the newest two" reads as "these are all".
+func TestTruncatedIsTrueWhenAQueueHoldsOlderMessagesThanWereReadEvenIfOnlyOneQueueHasAny(t *testing.T) {
+	e := withRocketMQ(t, true, nil)
+	for i := 1; i <= 5; i++ {
+		e.srv.Put("payments", 0, rmqtest.Message{Body: []byte(fmt.Sprintf("p-%d", i)), Stored: mqAt(10 + i)})
+	}
+	out, isErr := mqRead(t, e, "mq", "payments", 2)
+	if isErr {
+		t.Fatal(out)
+	}
+	if got := strings.Join(mqBodies(out), ","); got != "p-5,p-4" || out["count"] != float64(2) {
+		t.Fatalf("%v", out)
+	}
+	if out["truncated"] != true {
+		t.Errorf("there are older messages in the queue: truncated must say so: %v", out)
+	}
+	all, _ := mqRead(t, e, "mq", "payments", 20)
+	if all["truncated"] != nil {
+		t.Errorf("a read that reached the start of every queue is not truncated: %v", all)
+	}
+	exact, _ := mqRead(t, e, "mq", "payments", 6)
+	if exact["count"] != float64(6) || exact["truncated"] != nil {
+		t.Errorf("the limit equals what there is: nothing is left behind: %v", exact)
+	}
+}
+
+// A broker deletes its oldest messages. A queue whose first offset is above 0 starts there: reading from its very beginning reached
+// the start, and says nothing is left behind; reading less than it holds still says so.
+func TestAQueueWhoseOldestMessagesWereDeletedIsOnlyTruncatedByWhatIsStillThere(t *testing.T) {
+	e := withRocketMQ(t, true, nil)
+	for i := 1; i <= 5; i++ {
+		e.srv.Put("payments", 0, rmqtest.Message{Body: []byte(fmt.Sprintf("p-%d", i)), Stored: mqAt(10 + i)})
+	}
+	e.srv.Expire("payments", 0, 3) // the queue holds the fixture's message and p-1..p-5 (offsets 0..5); the broker deleted offsets 0..2
+	first, _ := mqRead(t, e, "mq", "payments", 20)
+	if first["truncated"] != nil {
+		t.Errorf("everything that is still there was read, and what was deleted is not left behind: %v", first)
+	}
+	less, _ := mqRead(t, e, "mq", "payments", 2)
+	if less["truncated"] != true || less["count"] != float64(2) {
+		t.Errorf("two of the three that are still there: %v", less)
+	}
+}
+
+// A limit that reaches back past a deleted start is moved to where the queue now begins, once, and the read goes on from there.
+func TestAReadThatReachesBackPastTheDeletedStartOfAQueueBeginsWhereItNowBegins(t *testing.T) {
+	e := withRocketMQ(t, true, nil)
+	for i := 1; i <= 6; i++ {
+		e.srv.Put("payments", 0, rmqtest.Message{Body: []byte(fmt.Sprintf("p-%d", i)), Stored: mqAt(10 + i)})
+	}
+	e.srv.Expire("payments", 0, 5)
+	out, isErr := mqRead(t, e, "mq", "payments", 4)
+	if isErr {
+		t.Fatalf("%v", out)
+	}
+	// offsets 0..6 (the fixture's message and p-1..p-6); the first five are deleted, so offsets 5 and 6 remain: p-5 and p-6
+	if got := strings.Join(mqBodies(out), ","); got != "p-6,p-5" || out["count"] != float64(2) {
+		t.Errorf("%s %v", got, out["count"])
+	}
+	for _, q := range e.srv.Requests() {
+		if q.Code == 11 && q.Ext["queueOffset"] != "" {
+			if strings.HasPrefix(q.Ext["queueOffset"], "-") {
+				t.Errorf("a pull at %s", q.Ext["queueOffset"])
+			}
+		}
+	}
+	if out["truncated"] != nil {
+		t.Errorf("what is still there was all read: %v", out)
+	}
+}
+
+// A broker may answer a pull below the first offset with a position past it. What lies between the first offset and that position was
+// skipped and not read, so the answer says there is more behind what it returned.
+func TestAMessageSkippedByABrokerThatMovesTheReaderOnIsSaidToBeLeftBehind(t *testing.T) {
+	e := withRocketMQ(t, true, nil)
+	for i := 1; i <= 6; i++ {
+		e.srv.Put("payments", 0, rmqtest.Message{Body: []byte(fmt.Sprintf("p-%d", i)), Stored: mqAt(10 + i)})
+	}
+	e.srv.Expire("payments", 0, 4)
+	e.srv.SetNextAfterExpiry(1) // told to go on from offset 5, though offset 4 is the first that is there
+	out, isErr := mqRead(t, e, "mq", "payments", 4)
+	if isErr {
+		t.Fatalf("%v", out)
+	}
+	if out["truncated"] != true {
+		t.Errorf("offset 4 exists and was skipped: %v", out)
+	}
+}
