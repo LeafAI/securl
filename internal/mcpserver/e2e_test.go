@@ -25,7 +25,6 @@ import (
 	_ "github.com/LeafAI/securl/internal/site/archery"
 	_ "github.com/LeafAI/securl/internal/site/gitlab"
 	_ "github.com/LeafAI/securl/internal/site/noauth"
-	_ "github.com/LeafAI/securl/internal/site/rocketmq"
 )
 
 // fakeGitLab: sign-in form with TOTP 2FA.
