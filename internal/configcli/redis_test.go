@@ -419,3 +419,21 @@ func TestARefusedRedisUserNameNamesTheFlagAndNotJustTheEntry(t *testing.T) {
 		t.Errorf("it was refused by the file-wide check, which says nothing about the flag: %q", r.err)
 	}
 }
+
+// A running securl reads its configuration once. A change that is saved and not applied looks like a change that was ignored, so every
+// saved change says that the running process must be restarted.
+func TestASavedChangeSaysThatARunningSecurlMustBeRestarted(t *testing.T) {
+	r := run(t, "", "", "redis", "add", "--name", "c", "--host", "h.example", "--environment", "dev")
+	for _, want := range []string{"restart", "already running", "locks the vault"} {
+		if !strings.Contains(r.out, want) {
+			t.Errorf("an add does not say %q:\n%s", want, r.out)
+		}
+	}
+	x := run(t, r.path, "", "redis", "remove", "c")
+	if !strings.Contains(x.out, "restart") {
+		t.Errorf("a remove does not say it either:\n%s", x.out)
+	}
+	if l := run(t, r.path, "", "redis", "list"); strings.Contains(l.out, "restart") {
+		t.Errorf("a list changes nothing and says nothing about restarting:\n%s", l.out)
+	}
+}
