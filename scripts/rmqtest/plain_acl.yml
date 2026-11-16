@@ -1,0 +1,35 @@
+# RocketMQ wants an access key of more than six characters. The fixture's accounts, fixed and public: these servers hold nothing and listen on the loopback only.
+#   reader1 / reader-secret-1  may SUBSCRIBE to orders and payments only (and to nothing else)
+#   writer1 / writer-secret-1  may PUBLISH to orders only (it cannot read)
+#   admin01 / admin-secret-1   administrator (the tests never use it to read)
+globalWhiteRemoteAddresses:
+
+accounts:
+  - accessKey: reader1
+    secretKey: reader-secret-1
+    whiteRemoteAddress:
+    admin: false
+    defaultTopicPerm: DENY
+    defaultGroupPerm: DENY
+    topicPerms:
+      - orders=SUB
+      - payments=SUB
+    groupPerms:
+      - securl-reader=SUB
+
+  - accessKey: writer1
+    secretKey: writer-secret-1
+    whiteRemoteAddress:
+    admin: false
+    defaultTopicPerm: DENY
+    defaultGroupPerm: DENY
+    topicPerms:
+      - orders=PUB
+      - payments=PUB
+      - secrets=PUB
+    groupPerms:
+
+  - accessKey: admin01
+    secretKey: admin-secret-1
+    whiteRemoteAddress:
+    admin: true

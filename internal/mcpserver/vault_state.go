@@ -45,6 +45,10 @@ func (s *Server) openCore() error {
 	if len(s.cfg.Redis) > 0 {
 		site.Replace(s.redisDriver())
 	}
+	// And a RocketMQ cluster's.
+	if len(s.cfg.RocketMQ) > 0 {
+		site.Replace(s.rocketmqDriver())
+	}
 	// And a DingTalk group's, in the same way.
 	if len(s.cfg.DingTalk.Groups) > 0 {
 		site.Replace(s.dingtalkDriver())

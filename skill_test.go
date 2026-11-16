@@ -66,14 +66,15 @@ func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 	known := map[string]bool{
 		"config": true, "vault": true, "doctor": true, "page": true, "version": true,
 		// the tools, as commands
-		"session": true, "site": true, "db": true, "archery": true, "telegram": true, "dingtalk": true, "redis": true, "request": true, "serve": true, "daemon": true, "unlock": true,
+		"session": true, "site": true, "db": true, "archery": true, "telegram": true, "dingtalk": true, "redis": true, "rocketmq": true, "request": true, "serve": true, "daemon": true, "unlock": true,
 	}
 	sub := map[string]map[string]bool{
-		"config":   {"init": true, "site": true, "show": true, "get": true, "set": true, "unset": true, "totp": true, "path": true, "db": true, "telegram": true, "dingtalk": true, "redis": true},
+		"config":   {"init": true, "site": true, "show": true, "get": true, "set": true, "unset": true, "totp": true, "path": true, "db": true, "telegram": true, "dingtalk": true, "redis": true, "rocketmq": true},
 		"vault":    {"init": true, "status": true, "passwd": true, "migrate": true},
 		"session":  {"open": true, "wait": true, "list": true, "close": true},
 		"telegram": {"targets": true, "send": true, "read": true},
 		"redis":    {"targets": true, "query": true, "exec": true},
+		"rocketmq": {"targets": true, "read": true},
 		"site":     {"list": true},
 		"daemon":   {"status": true, "install": true, "uninstall": true},
 		"db":       {"targets": true, "query": true, "exec": true},
@@ -84,7 +85,7 @@ func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 	dbSub := map[string]bool{"add": true, "list": true, "remove": true}
 	telegramSub := map[string]bool{"add": true, "list": true, "remove": true}
 	dingtalkSub := map[string]bool{"group": true}
-	redisSub := map[string]bool{"add": true, "list": true, "remove": true}
+	mqSub := map[string]bool{"add": true, "list": true, "remove": true}
 	dingtalkGroupSub := map[string]bool{"add": true, "list": true, "remove": true}
 	// a word of a command may hold a hyphen (`archery run-sql`, `archery workflow-status`)
 	cmd := regexp.MustCompile("(?m)(?:^|[`$] *|\\| )securl ((?:[a-z]+)(?: [a-z][a-z-]*)?(?: [a-z]+)?(?: [a-z]+)?)")
@@ -108,7 +109,7 @@ func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 		if w[0] == "config" && len(w) > 2 && w[1] == "telegram" && !telegramSub[w[2]] {
 			t.Errorf("`securl %s`: no such telegram command", m[1])
 		}
-		if w[0] == "config" && len(w) > 2 && w[1] == "redis" && !redisSub[w[2]] {
+		if w[0] == "config" && len(w) > 2 && (w[1] == "redis" || w[1] == "rocketmq") && !mqSub[w[2]] {
 			t.Errorf("`securl %s`: no such %s command", m[1], w[1])
 		}
 		if w[0] == "config" && len(w) > 2 && w[1] == "dingtalk" && !dingtalkSub[w[2]] {
@@ -411,8 +412,9 @@ func TestEveryFieldTheSkillNamesIsOneTheToolsTake(t *testing.T) {
 		"chat_not_writable": true, "chat_not_readable": true, "chat_not_reachable": true, "webhook_set": true, "reader_conflict": true, "text_too_long": true,
 		// error codes of the DingTalk group tools: held to the source by the same test
 		"refused_by_robot": true, "content_refused": true,
-		// error codes of the Redis tools: held to the source by the same test
-		"command_not_allowed": true, "not_a_write": true, "reply_too_large": true,
+		// error codes of the Redis and RocketMQ tools: held to the source by the same test
+		"command_not_allowed": true, "not_a_write": true, "topic_not_allowed": true, "topic_not_found": true, "permission_denied": true,
+		"consumer_group_missing": true, "reply_too_large": true,
 		// Values of a database target's mode.
 		"read_only": true, "read_write": true,
 		// Parameters of the sites' own APIs, used as examples of what goes into `query`.

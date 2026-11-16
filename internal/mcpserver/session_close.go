@@ -20,6 +20,7 @@ import (
 	"github.com/LeafAI/securl/internal/keyring"
 	"github.com/LeafAI/securl/internal/ratelimit"
 	"github.com/LeafAI/securl/internal/redissite"
+	"github.com/LeafAI/securl/internal/rocketmqsite"
 	"github.com/LeafAI/securl/internal/session"
 	"github.com/LeafAI/securl/internal/site"
 	"github.com/LeafAI/securl/internal/telegramsite"
@@ -136,6 +137,12 @@ func (s *Server) scopeOf(c *core, in LogoutInput) (closeScope, *ToolError) {
 		base = b
 	} else if strings.HasPrefix(strings.ToLower(in.URL), redissite.Scheme+":") {
 		_, b, terr := s.redisTarget(in.URL)
+		if terr != nil {
+			return closeScope{}, terr
+		}
+		base = b
+	} else if strings.HasPrefix(strings.ToLower(in.URL), rocketmqsite.Scheme+":") {
+		_, b, terr := s.rocketmqTarget(in.URL)
 		if terr != nil {
 			return closeScope{}, terr
 		}
@@ -374,6 +381,15 @@ func closeDetail(keys []string) string {
 	}
 	if servers > 0 {
 		d += fmt.Sprintf(" %d of them are Redis servers (redis://): the password a person typed is not kept anywhere else, and must be typed again.", servers)
+	}
+	var clusters int
+	for _, n := range names {
+		if strings.HasPrefix(n, rocketmqsite.Scheme+"://") {
+			clusters++
+		}
+	}
+	if clusters > 0 {
+		d += fmt.Sprintf(" %d of them are RocketMQ clusters (rocketmq://): the AccessKey and SecretKey a person typed are not kept anywhere else, and must be typed again.", clusters)
 	}
 	if hooks > 0 {
 		d += fmt.Sprintf(" %d of them are DingTalk groups (dingtalk://): the robot webhook a person typed is not kept anywhere else, and must be pasted again from the robot's settings in DingTalk.", hooks)

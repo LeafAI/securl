@@ -52,6 +52,9 @@ const usage = `usage: securl config <command> [-config file]
   redis add [flags]          guided setup of one Redis server (dev, test or staging), or give the answers as flags
   redis list                 show configured Redis targets
   redis remove <name>        forget a Redis target
+  rocketmq add [flags]       guided setup of one RocketMQ cluster an agent may read messages from (dev, test or staging), or give the answers as flags
+  rocketmq list              show configured RocketMQ targets
+  rocketmq remove <name>     forget a RocketMQ target
   show                       print the configuration (secrets are masked)
   get <key>                  print one setting         (-reveal shows secrets)
   set [key [value]]          change one setting; without arguments lists every setting
@@ -93,6 +96,8 @@ func Run(args []string, env Env) int {
 		err = cmdTelegram(env, rest)
 	case "redis":
 		err = cmdRedis(env, rest)
+	case "rocketmq":
+		err = cmdRocketMQ(env, rest)
 	case "dingtalk":
 		err = cmdDingTalk(env, rest)
 	default:

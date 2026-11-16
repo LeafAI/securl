@@ -538,6 +538,49 @@ func (e *Editor) SetRedis(r config.Redis) error {
 // RemoveRedis deletes a Redis target by name, and the redis list too when nothing is left in it.
 func (e *Editor) RemoveRedis(name string) bool { return e.removeEntry("redis", name) }
 
+// rocketmqEntry is how a RocketMQ target is written, and never an access key or a secret key.
+type rocketmqEntry struct {
+	Name          string   `yaml:"name"`
+	NameServers   []string `yaml:"namesrv,flow"`
+	Environment   string   `yaml:"environment"`
+	Topics        []string `yaml:"topics,flow"`
+	ConsumerGroup string   `yaml:"consumer_group,omitempty"`
+	TLS           string   `yaml:"tls,omitempty"`
+	MaxMessages   int      `yaml:"max_messages,omitempty"`
+	MaxBodyBytes  *int     `yaml:"max_body_bytes,omitempty"`
+	Timeout       string   `yaml:"timeout,omitempty"`
+}
+
+func rocketmqEntryOf(r config.RocketMQ) rocketmqEntry {
+	e := rocketmqEntry{Name: r.Name, NameServers: r.NameServers, Environment: r.Environment, Topics: r.Topics, ConsumerGroup: r.ConsumerGroup, TLS: r.TLS,
+		MaxMessages: r.MaxMessages, MaxBodyBytes: r.MaxBodyBytes}
+	if r.Timeout > 0 {
+		e.Timeout = r.Timeout.String()
+	}
+	return e
+}
+
+// RocketMQTargets returns the RocketMQ targets defined in the file, as written.
+func (e *Editor) RocketMQTargets() ([]config.RocketMQ, error) {
+	n := mapGet(e.root, "rocketmq")
+	if n == nil {
+		return nil, nil
+	}
+	var out []config.RocketMQ
+	if err := n.Decode(&out); err != nil {
+		return nil, fmt.Errorf("rocketmq: %w", err)
+	}
+	return out, nil
+}
+
+// SetRocketMQ adds or replaces (by name) a RocketMQ target. It never writes a key: a person types them on the login page.
+func (e *Editor) SetRocketMQ(r config.RocketMQ) error {
+	return e.setEntry("rocketmq", r.Name, rocketmqEntryOf(r))
+}
+
+// RemoveRocketMQ deletes a RocketMQ target by name, and the rocketmq list too when nothing is left in it.
+func (e *Editor) RemoveRocketMQ(name string) bool { return e.removeEntry("rocketmq", name) }
+
 // setEntry adds or replaces, by name, an entry of a top-level list, keeping the comment above a replaced one.
 func (e *Editor) setEntry(key, name string, entry any) error {
 	var node yaml.Node

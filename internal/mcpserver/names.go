@@ -21,6 +21,8 @@ const (
 	toolRedisTargets    = "redis_targets"    // the Redis servers the owner has made reachable
 	toolRedisQuery      = "redis_query"      // run one read command on a Redis server
 	toolRedisExec       = "redis_exec"       // change data on a Redis server that takes changes
+	toolRocketMQTargets = "rocketmq_targets" // the RocketMQ clusters and topics the owner has made readable
+	toolRocketMQRead    = "rocketmq_read"    // read the latest messages of a topic, without consuming them
 	toolDingTalkTargets = "dingtalk_targets" // the DingTalk groups the owner has made reachable
 	toolDingTalkSend    = "dingtalk_send"    // say something in a DingTalk group
 	toolVaultStatus     = "vault_status"
