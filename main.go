@@ -38,6 +38,7 @@ import (
 	_ "github.com/LeafAI/securl/internal/site/jenkins"
 	_ "github.com/LeafAI/securl/internal/site/kibana"
 	_ "github.com/LeafAI/securl/internal/site/kubesphere"
+	_ "github.com/LeafAI/securl/internal/site/nacos"
 	_ "github.com/LeafAI/securl/internal/site/nightingale"
 	_ "github.com/LeafAI/securl/internal/site/noauth"
 	_ "github.com/LeafAI/securl/internal/site/rocketmq"
