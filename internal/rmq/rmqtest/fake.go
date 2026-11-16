@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"sort"
 	"strconv"
@@ -74,6 +75,11 @@ type Server struct {
 	slow chan struct{}
 	// RouteAddr overrides the broker address the route names (a test of a route that points somewhere else).
 	routeAddr string
+	// expired is how many of the oldest messages of a queue ("topic#queue") the broker has deleted: its first offset is that many.
+	expired map[string]int
+	// nextAfterExpiry, when set, is how far past the first offset a pull below it is told to go on from: a broker that moves a reader
+	// on by more than to the first message.
+	nextAfterExpiry int
 	// failQueue makes a queue answer with this response code ("topic#queue"), the others as usual.
 	failQueue map[string]int
 	// perPull caps how many messages one pull returns (0: as many as asked), and delay is how long each answer takes.
@@ -136,6 +142,26 @@ func (s *Server) FailQueue(topic string, queue, code int) {
 	}
 	s.failQueue[fmt.Sprintf("%s#%d", topic, queue)] = code
 }
+
+// Expire makes the broker delete the n oldest messages of a queue, as its retention does: the queue's first offset becomes n, and a
+// pull below it is answered as one outside the queue.
+func (s *Server) Expire(topic string, queue, n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.expired == nil {
+		s.expired = map[string]int{}
+	}
+	s.expired[fmt.Sprintf("%s#%d", topic, queue)] = n
+}
+
+func (s *Server) floor(ext map[string]string) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return int64(s.expired[ext["topic"]+"#"+ext["queueId"]])
+}
+
+// SetNextAfterExpiry makes a pull below a queue's first offset answer with a next offset this far past it.
+func (s *Server) SetNextAfterExpiry(n int) { s.mu.Lock(); s.nextAfterExpiry = n; s.mu.Unlock() }
 
 // SetPerPull caps how many messages one pull returns, as a broker with a small batch size does.
 func (s *Server) SetPerPull(n int) { s.mu.Lock(); s.perPull = n; s.mu.Unlock() }
@@ -240,8 +266,14 @@ func (s *Server) serve(c net.Conn) {
 	}
 }
 
+// maxFake bounds what the fake builds in one frame: far above anything a test sends, and below anything that could overflow a size.
+const maxFake = 64 << 20
+
 func encode(f frame, body []byte) []byte {
 	h, _ := json.Marshal(f)
+	if len(h) > maxFake || len(body) > maxFake {
+		return nil
+	}
 	total := 4 + len(h) + len(body)
 	out := make([]byte, 4+total)
 	binary.BigEndian.PutUint32(out, uint32(total))
@@ -425,12 +457,16 @@ func (s *Server) pull(ext map[string]string) (frame, []byte) {
 		max = s.perPull
 	}
 	s.mu.Unlock()
+	floor := s.floor(ext)
 	hdr := func(next int64) map[string]string {
-		return map[string]string{"nextBeginOffset": strconv.FormatInt(next, 10), "minOffset": "0", "maxOffset": strconv.Itoa(len(q)), "suggestWhichBrokerId": "0", "groupSysFlag": "0", "topicSysFlag": "0"}
+		return map[string]string{"nextBeginOffset": strconv.FormatInt(next, 10), "minOffset": strconv.FormatInt(floor, 10), "maxOffset": strconv.Itoa(len(q)), "suggestWhichBrokerId": "0", "groupSysFlag": "0", "topicSysFlag": "0"}
 	}
 	switch {
-	case off < 0:
-		return frame{Code: 21, Remark: "OFFSET_TOO_SMALL", ExtFields: hdr(0)}, nil
+	case off < floor:
+		s.mu.Lock()
+		skip := int64(s.nextAfterExpiry)
+		s.mu.Unlock()
+		return frame{Code: 21, Remark: "OFFSET_TOO_SMALL", ExtFields: hdr(floor + skip)}, nil
 	case off > int64(len(q)):
 		return frame{Code: 21, Remark: "OFFSET_OVERFLOW_BADLY", ExtFields: hdr(int64(len(q)))}, nil
 	case off == int64(len(q)):
@@ -487,7 +523,7 @@ func EncodeMessage(topic string, queue int, offset int64, m Message) []byte {
 		u32(-626843481) // magic 0xdaa320a7: version 1, whose topic length is a byte
 	}
 	u32(0)                         // body crc
-	u32(int32(queue))              // queue id
+	u32(clampQueue(queue))         // queue id
 	u32(0)                         // flag
 	u64(offset)                    // queue offset
 	u64(offset * 100)              // physical offset
@@ -512,4 +548,12 @@ func EncodeMessage(topic string, queue int, offset int64, m Message) []byte {
 	b = append(b, props...)
 	binary.BigEndian.PutUint32(b, uint32(len(b)))
 	return b
+}
+
+// clampQueue is a queue id as the int32 the wire holds: a queue id outside it cannot exist, and is not narrowed silently.
+func clampQueue(q int) int32 {
+	if q < 0 || q > math.MaxInt32 {
+		return 0
+	}
+	return int32(q)
 }

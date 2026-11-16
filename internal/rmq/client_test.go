@@ -1129,3 +1129,21 @@ func TestAConnectionThatCannotBeMadeInTimeIsATimeoutAndNotAnUnreachableServer(t 
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A request is a handful of fields. A header larger than the one a reply may have is not built and sent: its size is not computed
+// from something a caller could make large.
+func TestARequestWhoseHeaderIsLargerThanAnyHeaderIsNotSent(t *testing.T) {
+	s := fake(t)
+	c := open(t, s, ak, sk)
+	huge := strings.Repeat("a", maxHeader+1)
+	_, _, err := c.call(context.Background(), s.Addr, 11, map[string]string{"topic": huge}, true)
+	if !errors.Is(err, ErrProtocol) {
+		t.Fatalf("%v", err)
+	}
+	if n := len(s.Requests()); n != 0 {
+		t.Errorf("%d requests reached the broker", n)
+	}
+	if _, _, err := c.call(context.Background(), s.Addr, 105, map[string]string{"topic": "orders"}, false); err != nil {
+		t.Errorf("an ordinary request is refused: %v", err)
+	}
+}

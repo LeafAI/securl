@@ -145,12 +145,13 @@ func (s *Server) doRocketMQRead(ctx context.Context, in RocketMQReadInput) (any,
 	if len(queues) > rmqMaxQueuesToRead {
 		queues, cutQueues = queues[:rmqMaxQueuesToRead], true
 	}
-	got, notes, err := readLatest(ctx, c.client, queues, limit)
+	found, err := readLatest(ctx, c.client, queues, limit)
 	if err != nil {
 		return nil, s.rocketmqErr(c, err)
 	}
-	more := len(got) > limit
-	if more {
+	got, notes := found.msgs, found.notes
+	more := len(got) > limit || found.older
+	if len(got) > limit {
 		got = got[:limit]
 	}
 	sc := redact.New([]string{c.sess[rocketmqsite.TokenAccessKey], c.sess[rocketmqsite.TokenSecretKey]})
@@ -173,12 +174,22 @@ type queueRead struct {
 	msgs []rmq.Message
 	note string
 	err  error
+	// older is whether the queue holds messages before the ones read. A read goes back from the end of a queue as far as the limit, so
+	// what lies before that was not read; the queue's own first offset (the broker says it with every pull) tells whether there is any.
+	older bool
 }
 
 // readLatest reads the end of every queue and merges what it finds, newest first. Nothing is consumed: a pull here commits no offset.
 // A queue that could not be read on its own (not a refusal that would apply to all) is skipped and said so; a refusal that is the same
 // everywhere (the key, the permission, the network) is the call's own error.
-func readLatest(ctx context.Context, c *rmq.Client, queues []rmq.Queue, limit int) ([]rmq.Message, []string, error) {
+// latest is what reading the end of every queue of a topic found.
+type latest struct {
+	msgs  []rmq.Message // newest first
+	notes []string      // what could not be read
+	older bool          // some queue holds messages before the ones read
+}
+
+func readLatest(ctx context.Context, c *rmq.Client, queues []rmq.Queue, limit int) (latest, error) {
 	results := make([]queueRead, len(queues))
 	sem := make(chan struct{}, rmqReadParallel)
 	var wg sync.WaitGroup
@@ -195,7 +206,7 @@ func readLatest(ctx context.Context, c *rmq.Client, queues []rmq.Queue, limit in
 	var all []rmq.Message
 	var notes []string
 	var firstErr error
-	failed := 0
+	failed, older := 0, false
 	for _, r := range results {
 		if r.err != nil {
 			failed++
@@ -205,16 +216,17 @@ func readLatest(ctx context.Context, c *rmq.Client, queues []rmq.Queue, limit in
 			continue
 		}
 		all = append(all, r.msgs...)
+		older = older || r.older
 		if r.note != "" {
 			notes = append(notes, r.note)
 		}
 	}
 	if failed == len(queues) && firstErr != nil {
-		return nil, nil, firstErr
+		return latest{}, firstErr
 	}
 	if failed > 0 {
 		if isEveryWhere(firstErr) {
-			return nil, nil, firstErr
+			return latest{}, firstErr
 		}
 		notes = append(notes, strconv.Itoa(failed)+" of "+strconv.Itoa(len(queues))+" queues could not be read, so the newest messages of those are missing")
 	}
@@ -227,7 +239,7 @@ func readLatest(ctx context.Context, c *rmq.Client, queues []rmq.Queue, limit in
 		}
 		return all[i].QueueOffset > all[j].QueueOffset
 	})
-	return all, notes, nil
+	return latest{msgs: all, notes: notes, older: older}, nil
 }
 
 // isEveryWhere is whether an error is one that would be the same on every queue, and so is the answer of the whole call.
@@ -247,10 +259,15 @@ func readQueueEnd(ctx context.Context, c *rmq.Client, q rmq.Queue, limit int) qu
 	}
 	var got []rmq.Message
 	moved := false
+	first, floor := start, int64(0)
 	for pulls := 0; start < max && pulls < rmqPullsPerQueue; pulls++ {
 		res, err := c.Pull(ctx, q, start, limit)
+		if res != nil {
+			floor = res.MinOffset
+		}
 		if errors.Is(err, rmq.ErrOffsetOutOfRange) && !moved && res != nil && res.NextOffset > start {
 			start, moved = res.NextOffset, true // the oldest messages were deleted: begin where the queue now begins
+			first = start
 			continue
 		}
 		if err != nil {
@@ -268,7 +285,7 @@ func readQueueEnd(ctx context.Context, c *rmq.Client, q rmq.Queue, limit int) qu
 	if len(got) > limit {
 		got = got[len(got)-limit:]
 	}
-	r := queueRead{msgs: got}
+	r := queueRead{msgs: got, older: first > floor}
 	if start < max && len(got) < limit && len(got) > 0 {
 		r.note = "queue " + strconv.Itoa(q.ID) + " could not be read to its end in one call, so its newest messages may be missing"
 	}
