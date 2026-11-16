@@ -19,6 +19,7 @@ import (
 	"github.com/LeafAI/securl/internal/notify"
 	"github.com/LeafAI/securl/internal/ratelimit"
 	"github.com/LeafAI/securl/internal/redissite"
+	"github.com/LeafAI/securl/internal/rocketmqsite"
 	"github.com/LeafAI/securl/internal/session"
 	"github.com/LeafAI/securl/internal/site"
 	"github.com/LeafAI/securl/internal/telegramsite"
@@ -85,6 +86,11 @@ func (s *Server) ensureLogin(ctx context.Context, req *mcp.CallToolRequest, raw,
 			return nil, terr
 		}
 		d = s.redisDriver()
+	} else if strings.HasPrefix(strings.ToLower(raw), rocketmqsite.Scheme+":") {
+		if _, base, terr = s.rocketmqTarget(raw); terr != nil {
+			return nil, terr
+		}
+		d = s.rocketmqDriver()
 	} else if strings.HasPrefix(strings.ToLower(raw), dingtalksite.Scheme+":") {
 		if _, base, terr = s.dingtalkTarget(raw); terr != nil {
 			return nil, terr

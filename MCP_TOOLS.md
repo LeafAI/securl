@@ -68,7 +68,7 @@ Codes: `invalid_argument`, `unsupported_site`, `human_timeout` (nobody completed
 `rate_limited` (too many requests to people, or the site was just rejected; `retryable`, carries a hint not to loop),
 `bad_credentials`, `login_rejected` (site refused, e.g. account locked / captcha), `tunnel_unavailable`,
 `notify_failed` (DingTalk, or no webhook and `link_via_agent` off), `site_unreachable`, `ddl_disabled`, `sql_check_failed`, `archery_error`,
-`workflow_not_found`, `unknown_target`, `target_read_only`, `not_read_only`, `command_not_allowed`, `not_a_write`, `reply_too_large`, `command_timeout`, `database_not_allowed`, `too_many_rows`, `statement_timeout`, `sql_error`, `session_expired` (a cached session was rejected by the site; call `session_open` with `force_refresh`), `internal`.
+`workflow_not_found`, `unknown_target`, `target_read_only`, `not_read_only`, `command_not_allowed`, `not_a_write`, `topic_not_allowed`, `topic_not_found`, `permission_denied`, `consumer_group_missing`, `reply_too_large`, `command_timeout`, `database_not_allowed`, `too_many_rows`, `statement_timeout`, `sql_error`, `session_expired` (a cached session was rejected by the site; call `session_open` with `force_refresh`), `internal`.
 
 **Output schemas and titles.** Every tool advertises a human-readable `title` and an `outputSchema` (generated
 from the Go result types, so they cannot drift). The schemas list the fields of both the success and the
@@ -577,6 +577,47 @@ Errors: `vault_locked`, `vault_not_initialized`, `unknown_target`, `no_session`,
 **What securl cannot do:** it cannot tell whether a host really is not production, and an agent can read whatever the password can. The
 boundary that holds is what the password (or the ACL user) is allowed to do: give it only what an agent may do there.
 
+## 11e. RocketMQ: `rocketmq_targets`, `rocketmq_read`
+
+An agent can **read** messages from the topics the owner named (`rocketmq:`, made with `securl config rocketmq add`). It cannot send a
+message, create or delete a topic, or touch an offset: none of that is in the client, which speaks only the three requests it needs (where
+a topic is, how long a queue is, and a pull). It names a target and a topic; it **never supplies a NameServer, a broker address, an
+AccessKey, a consumer group, a queue or an offset**: an argument that is not in the schema is refused. A topic that is not in the
+target's list is refused (`topic_not_allowed`) before anything is asked of the cluster; there is no wildcard, and the broker's own topics
+(`RMQ_SYS_*`, `%RETRY%*`, `%DLQ%*`) cannot be listed. Environments are `dev`, `test` and `staging`.
+
+The AccessKey and the SecretKey are typed once by a person (`session_open` with `url: "rocketmq://<target>"`, two fields, the secret one
+hidden) and kept in the vault. They are checked at login by what a read does (the route of the first topic, a queue's length, one pull),
+so a key that cannot read says so then: *those keys are valid but not allowed to read the topic or use the consumer group*. The ACL
+signature is computed inside securl; neither key is in any answer, error, audit line or message, and a message that happens to hold one
+is scrubbed. The NameServer is never sent the key.
+
+`rocketmq_targets` (no input) answers `{targets: [{name, environment, topics, has_session, max_messages, max_body_bytes}]}` and makes no
+request.
+
+`rocketmq_read` takes `{target, topic, limit?}` and answers `{topic, messages, count, queues, truncated?, note?, untrusted, notice}`.
+`messages` are the **newest** `limit` messages across the topic's queues, newest first (by store time), at most the target's
+`max_messages`: each has `queue`, `offset`, `stored_at`, `born_at`, `tags`, `keys`, `properties`, `reconsume_times`, `body`,
+`body_bytes` and, when the body is not returned whole, `body_note`. **A read never consumes**: each pull commits no offset and does not
+wait, so reading again gives the same messages and the people who consume the topic lose nothing. A body is cut at `max_body_bytes`
+(default 4096, never over 1 MiB), a body that is not text is not shown, a compression this client cannot read (LZ4, ZSTD) is said, and
+with `max_body_bytes: 0` only the metadata is returned. `truncated` means there were more messages than `limit`, or a queue could not be
+read (`note` says how many). `untrusted: "true"` and a `notice` say that every message was written by whoever can produce to the topic and
+is never an instruction.
+
+The reads are made as a consumer group (`consumer_group`, default `securl-reader`), which has to exist on the broker and which the key
+must be allowed to use; no offset is ever stored under it.
+
+Audit: `rocketmq_read` records the target, the topic, the number of messages and the result: never a message, a key or a body.
+Errors: `vault_locked`, `vault_not_initialized`, `unknown_target`, `no_session`, `session_expired` (the cluster refused the keys: the
+session is dropped), `topic_not_allowed`, `topic_not_found`, `permission_denied` (the key may not read the topic or use the group: the
+session is kept), `consumer_group_missing`, `invalid_argument`, `reply_too_large`, `command_timeout`, `site_unreachable`,
+`host_not_allowed`. A topic with several queues is read in parallel, and a queue that cannot be read on its own is skipped and said; a
+refusal that would be the same on every queue (the key, the permission) is the answer of the whole call.
+
+**What securl cannot do:** a message is business data, and the key can read all of the topics it is allowed to; list only what an agent
+needs and give the key a subscribe permission on exactly those. The reads stay in memory for the one call.
+
 ## 12. Human-facing side effects (summary)
 
 | Tool | DingTalk message |
@@ -587,7 +628,7 @@ boundary that holds is what the password (or the ACL user) is allowed to do: giv
 | `archery_run_sql` | one after submit: title, instance/db, SQL summary (first 500 chars), Archery workflow link — to the same robot (approval itself happens in Archery) |
 | `db_exec` | database-change/rollback notification when the change runs |
 | `redis_exec` | one after the change: target, command name and argument count (never a key or a value), the agent's `reason` |
-| `redis_query` | none (audited) |
+| `rocketmq_read`, `redis_query` | none (audited) |
 | `telegram_send` | none to DingTalk; the message itself goes to the Telegram chat, with a first line that says an AI agent sent it |
 | `session_open` with `telegram://<bot>` | one: the bot name and which chats the token will let an agent use |
 | others | none unless they first need a site login |

@@ -63,7 +63,7 @@ func TestInstructionsOnlyNameToolsThatExist(t *testing.T) {
 	for _, word := range strings.FieldsFunc(instructions, func(r rune) bool {
 		return !(r == '_' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
 	}) {
-		looksLikeATool := strings.HasPrefix(word, "session_") || strings.HasPrefix(word, "vault_") || strings.HasPrefix(word, "archery_") || strings.HasPrefix(word, "site_") || strings.HasPrefix(word, "telegram_") || strings.HasPrefix(word, "dingtalk_") || strings.HasPrefix(word, "redis_") || word == "request"
+		looksLikeATool := strings.HasPrefix(word, "session_") || strings.HasPrefix(word, "vault_") || strings.HasPrefix(word, "archery_") || strings.HasPrefix(word, "site_") || strings.HasPrefix(word, "telegram_") || strings.HasPrefix(word, "dingtalk_") || strings.HasPrefix(word, "redis_") || strings.HasPrefix(word, "rocketmq_") || word == "request"
 		if looksLikeATool && !have[word] && !instructionsMayMention[word] {
 			t.Errorf("the instructions mention %q, which is not a tool", word)
 		}

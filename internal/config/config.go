@@ -46,6 +46,9 @@ type Config struct {
 	Databases []Database `yaml:"databases"`
 	// Redis lists the Redis servers an agent may use, by name. Their passwords are typed on a page and kept in the vault.
 	Redis []Redis `yaml:"redis"`
+	// RocketMQ lists the RocketMQ clusters an agent may read messages from, by name and by topic. Their keys are typed on a page and
+	// kept in the vault.
+	RocketMQ []RocketMQ `yaml:"rocketmq"`
 	// Telegram lists the bots, and the chats of each, that an agent may send to and read from.
 	Telegram Telegram `yaml:"telegram"`
 	Daemon   Daemon   `yaml:"daemon"`
@@ -192,6 +195,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := validateRedis(c.Redis); err != nil {
+		return err
+	}
+	if err := validateRocketMQ(c.RocketMQ); err != nil {
 		return err
 	}
 	if err := validateDingTalkGroups(c.DingTalk.Groups); err != nil {

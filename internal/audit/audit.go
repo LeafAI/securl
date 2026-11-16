@@ -46,6 +46,7 @@ type Event struct {
 	Group     string   `json:"group,omitempty"`     // dingtalk_*: the group's name in the configuration (never its webhook)
 	Command   string   `json:"command,omitempty"`   // redis_*: the name of the command (GET, DEL ...), never a key or a value
 	KeyCount  int      `json:"key_count,omitempty"` // redis_*: how many arguments the command had after its name
+	Topic     string   `json:"topic,omitempty"`     // rocketmq_read: the topic's name in the configuration
 }
 
 // Fingerprint returns the length and a short SHA-256 prefix of s, enough to match a statement to the one

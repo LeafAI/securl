@@ -32,10 +32,12 @@ jobs:
     env:
       SECURL_TEST_PG: 127.0.0.1:5432
       SECURL_TEST_MYSQL: 127.0.0.1:3306
-      # The throwaway Redis servers that the next steps start (scripts/redistest).
+      # The throwaway Redis servers and the RocketMQ cluster that the next steps start (scripts/redistest, scripts/rmqtest).
       SECURL_TEST_REDIS: 127.0.0.1:36379
       SECURL_TEST_REDIS_PW: 127.0.0.1:36380
       SECURL_TEST_REDIS_PASSWORD: T3st-Pass-9x
+      SECURL_TEST_RMQ_NS: 127.0.0.1:39876
+      SECURL_TEST_RMQ_BROKER: 127.0.0.1:30911
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -58,6 +60,9 @@ jobs:
       # Two real Redis servers (one with no password, one with): the loopback only, a fixed public test password.
       - name: Start Redis
         run: scripts/redistest/up.sh
+      # A real RocketMQ with ACL on: the loopback only, fixed public test accounts.
+      - name: Start RocketMQ
+        run: scripts/rmqtest/up.sh
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test -race ./...

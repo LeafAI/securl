@@ -312,6 +312,9 @@ exists only while a person is being asked.
   the default (no `KEYS`, scripts, `CONFIG` or `FLUSHALL`); `mode: read_write` adds ordinary writes through `redis_exec`, with a reason and
   a note to the team. Answers are marked as data, and the audit holds the command name and the argument count, never a key or a value.
   `environment: prod` is refused. Give the password only what an agent may do: that is the boundary that holds.
+- **RocketMQ** (`rocketmq:`) lets an agent **read** messages from the topics the owner listed, over the broker's own protocol, with an
+  AccessKey and SecretKey that a person types once. It cannot send or change anything, reading consumes nothing (no offset is committed),
+  the newest messages come back first, a body is cut at a limit (or left out entirely), and the answer is marked as data.
 - **Telegram** (`telegram:`) lets an agent speak in, and read from, the chats the owner names, through a bot. The agent names a bot
   and a chat; it never supplies a chat id, a token, an address or a parse mode. The bot's token is typed by a person on the usual
   page and kept in the vault, and it is in no answer, error, audit line or message (it is in the path of every Bot API request, so
@@ -451,6 +454,14 @@ redis:                       # `securl config redis add` writes this; the PASSWO
     # mode: read_only         # read_only (default) | read_write
     # tls: verify             # verify (default) | skip-verify | disable
     # max_items: 1000         # elements of a reply an agent is given
+rocketmq:                    # `securl config rocketmq add` writes this; the keys are never here
+  - name: mq
+    namesrv: [ns1.dev.example:9876]
+    environment: dev
+    topics: [orders, payments]   # the only topics an agent may read: required, no wildcard
+    # consumer_group: securl-reader   # must exist on the broker; no offset is ever stored under it
+    # max_messages: 20        # newest messages one read returns
+    # max_body_bytes: 4096    # 0: the metadata of a message and never its body
 telegram:                    # bots an agent may talk through; `securl config telegram add` writes this
   proxy: http://127.0.0.1:1080   # optional; reaches api.telegram.org (http, https or socks5; may carry user:password, never shown)
   bots:
@@ -504,7 +515,8 @@ Every tool has a title and an output schema. Read-only resources: `securl://site
 
 `vault_status`, `vault_unlock`, `session_open`, `session_wait`, `site_list`, `session_list`, `session_close`, `archery_instances`, `archery_groups`, `archery_query`,
 `archery_run_sql`, `archery_wait`, `archery_workflow_status`, `archery_cancel`, `db_targets`, `db_query`, `db_exec`,
-`telegram_targets`, `telegram_send`, `telegram_read`, `dingtalk_targets`, `dingtalk_send`, `redis_targets`, `redis_query`, `redis_exec`.
+`telegram_targets`, `telegram_send`, `telegram_read`, `dingtalk_targets`, `dingtalk_send`, `redis_targets`, `redis_query`, `redis_exec`,
+`rocketmq_targets`, `rocketmq_read`.
 Long operations return a `pending` result with an id after `max_block_seconds`; resume with `session_wait` /
 `archery_wait`. `session_close` is one of them: it closes nothing until a person has typed `DELETE` on a page that names the
 sessions (a database account is a password that cannot be recovered), so it answers `pending` and is resumed with its `close_id`.
@@ -523,7 +535,7 @@ securl archery run-sql --url https://archery.corp.example --instance x --databas
 ```
 
 - Every command, by the tool it runs: `securl session open|wait|list|close`, `securl site list`, `securl request`, `securl db
-  targets|query|exec`, `securl telegram targets|send|read`, `securl dingtalk targets|send`, `securl redis targets|query|exec` and `securl archery instances|groups|query|run-sql|wait|workflow-status|cancel`. `securl session close`
+  targets|query|exec`, `securl telegram targets|send|read`, `securl dingtalk targets|send`, `securl redis targets|query|exec`, `securl rocketmq targets|read` and `securl archery instances|groups|query|run-sql|wait|workflow-status|cancel`. `securl session close`
   asks a person to confirm and waits for them. The flags of a command are `securl <group> <command> --help`. Besides the
   tools: `securl vault init|status|passwd|migrate`, `securl unlock`, `securl daemon` (and `status`, `install`, `uninstall`),
   `securl doctor`, `securl config ...`, `securl page [dir]` (write the login page to a directory, to host it yourself),

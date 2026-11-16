@@ -392,6 +392,28 @@ commands (no `KEYS`, no scripts, no `CONFIG`, no `FLUSHALL`).
 
 `grep redis audit.jsonl` shows the target, the command name and how many arguments it had; never a key or a value.
 
+### RocketMQ: letting an agent read messages
+
+An agent names a RocketMQ target and one of its topics, and reads the newest messages. It cannot send a message or change anything, and
+reading consumes nothing.
+
+1. **Tell securl.** `securl config rocketmq add` (guided) or
+   `securl config rocketmq add --name mq --namesrv ns1.dev.example:9876,ns2.dev.example:9876 --environment dev --topics orders,payments`.
+   The topics are required: there is no wildcard and no "all", and the broker's own topics (`RMQ_SYS_*`, `%RETRY%*`, `%DLQ%*`) cannot be
+   listed. `--tls` is `disable` by default (RocketMQ's port is plain unless the broker was set up for TLS). `--max-messages` and
+   `--max-body-bytes` bound what one read returns (`--max-body-bytes 0`: the metadata of a message and never its body).
+2. **A consumer group.** Reads are made as a consumer group, `securl-reader` unless you say `--consumer-group`. **It has to exist on the
+   broker** (create it with `mqadmin updateSubGroup`, or use one that exists) **and the key must be allowed to use it.** No offset is ever
+   stored under it, so it is harmless to a real consumer.
+3. **Type the AccessKey and the SecretKey once.** The agent calls `session_open` with `rocketmq://mq`; you type both on the usual page.
+   The login reads once, so a key that may not read says so there (*not allowed to read the topic ... or to use the consumer group*).
+4. **Give the key only a subscribe permission** on exactly the listed topics and on the group: a key that can also publish or administer
+   is more than an agent needs. A key that has only a publish permission (a producer's key) cannot read.
+5. A message is business data. Whoever can produce to a topic can put text in it that tries to instruct the agent; the answer says so,
+   and the skill tells the agent to treat it as data.
+
+`grep rocketmq_read audit.jsonl` shows the target, the topic and how many messages came back; never a message or a key.
+
 ## 8. Not supported (yet)
 
 GitLab reCAPTCHA after repeated failures; WebAuthn/passkey-only accounts; Jenkins 2FA plugins; any TOTP on Kibana
