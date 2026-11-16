@@ -307,6 +307,11 @@ exists only while a person is being asked.
   on, and tells the team in DingTalk afterwards. `environment: prod` is refused when the configuration loads. securl
   cannot know that a host is really not production, and an agent can read whatever the account can: give the account
   only what an agent may do there, and no `dblink`, `postgres_fdw` or `FEDERATED` route to a production server.
+- **Redis** (`redis:`) lets an agent read a Redis server the owner named, and change it only where the owner allows. It names a target;
+  it never gives a host or a password (a person types the password once and it stays in the vault). A short allowlist of read commands is
+  the default (no `KEYS`, scripts, `CONFIG` or `FLUSHALL`); `mode: read_write` adds ordinary writes through `redis_exec`, with a reason and
+  a note to the team. Answers are marked as data, and the audit holds the command name and the argument count, never a key or a value.
+  `environment: prod` is refused. Give the password only what an agent may do: that is the boundary that holds.
 - **Telegram** (`telegram:`) lets an agent speak in, and read from, the chats the owner names, through a bot. The agent names a bot
   and a chat; it never supplies a chat id, a token, an address or a parse mode. The bot's token is typed by a person on the usual
   page and kept in the vault, and it is in no answer, error, audit line or message (it is in the path of every Bot API request, so
@@ -437,6 +442,15 @@ databases:                   # PostgreSQL / MySQL for dev, test or staging; `sec
     # max_rows: 1000         # rows one query may return (at most 10000)
     # max_changed_rows: 1000 # a change that touches more rows is rolled back
     # statement_timeout: 30s # per statement (at most 5m)
+redis:                       # `securl config redis add` writes this; the PASSWORD is never here
+  - name: cache
+    host: redis.dev.example
+    environment: dev          # dev | test | staging
+    # port: 6379
+    # username: app           # a Redis 6 ACL user (not a secret)
+    # mode: read_only         # read_only (default) | read_write
+    # tls: verify             # verify (default) | skip-verify | disable
+    # max_items: 1000         # elements of a reply an agent is given
 telegram:                    # bots an agent may talk through; `securl config telegram add` writes this
   proxy: http://127.0.0.1:1080   # optional; reaches api.telegram.org (http, https or socks5; may carry user:password, never shown)
   bots:
@@ -490,7 +504,7 @@ Every tool has a title and an output schema. Read-only resources: `securl://site
 
 `vault_status`, `vault_unlock`, `session_open`, `session_wait`, `site_list`, `session_list`, `session_close`, `archery_instances`, `archery_groups`, `archery_query`,
 `archery_run_sql`, `archery_wait`, `archery_workflow_status`, `archery_cancel`, `db_targets`, `db_query`, `db_exec`,
-`telegram_targets`, `telegram_send`, `telegram_read`, `dingtalk_targets`, `dingtalk_send`.
+`telegram_targets`, `telegram_send`, `telegram_read`, `dingtalk_targets`, `dingtalk_send`, `redis_targets`, `redis_query`, `redis_exec`.
 Long operations return a `pending` result with an id after `max_block_seconds`; resume with `session_wait` /
 `archery_wait`. `session_close` is one of them: it closes nothing until a person has typed `DELETE` on a page that names the
 sessions (a database account is a password that cannot be recovered), so it answers `pending` and is resumed with its `close_id`.
@@ -509,7 +523,7 @@ securl archery run-sql --url https://archery.corp.example --instance x --databas
 ```
 
 - Every command, by the tool it runs: `securl session open|wait|list|close`, `securl site list`, `securl request`, `securl db
-  targets|query|exec`, `securl telegram targets|send|read`, `securl dingtalk targets|send` and `securl archery instances|groups|query|run-sql|wait|workflow-status|cancel`. `securl session close`
+  targets|query|exec`, `securl telegram targets|send|read`, `securl dingtalk targets|send`, `securl redis targets|query|exec` and `securl archery instances|groups|query|run-sql|wait|workflow-status|cancel`. `securl session close`
   asks a person to confirm and waits for them. The flags of a command are `securl <group> <command> --help`. Besides the
   tools: `securl vault init|status|passwd|migrate`, `securl unlock`, `securl daemon` (and `status`, `install`, `uninstall`),
   `securl doctor`, `securl config ...`, `securl page [dir]` (write the login page to a directory, to host it yourself),

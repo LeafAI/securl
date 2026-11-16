@@ -18,6 +18,9 @@ const (
 	toolTelegramTargets = "telegram_targets" // the bots and chats the owner has made reachable
 	toolTelegramSend    = "telegram_send"    // say something in a chat
 	toolTelegramRead    = "telegram_read"    // read what was said in a chat
+	toolRedisTargets    = "redis_targets"    // the Redis servers the owner has made reachable
+	toolRedisQuery      = "redis_query"      // run one read command on a Redis server
+	toolRedisExec       = "redis_exec"       // change data on a Redis server that takes changes
 	toolDingTalkTargets = "dingtalk_targets" // the DingTalk groups the owner has made reachable
 	toolDingTalkSend    = "dingtalk_send"    // say something in a DingTalk group
 	toolVaultStatus     = "vault_status"

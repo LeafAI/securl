@@ -490,6 +490,94 @@ func (e *Editor) RemoveDatabase(name string) bool {
 	return false
 }
 
+// redisEntry is how a Redis target is written: only what the owner chose, in an order a person reads top to bottom, and no password
+// (a person types that on the login page and it lives in the vault).
+type redisEntry struct {
+	Name           string `yaml:"name"`
+	Host           string `yaml:"host"`
+	Port           int    `yaml:"port,omitempty"`
+	Environment    string `yaml:"environment"`
+	Username       string `yaml:"username,omitempty"`
+	Mode           string `yaml:"mode,omitempty"`
+	TLS            string `yaml:"tls,omitempty"`
+	MaxItems       int    `yaml:"max_items,omitempty"`
+	MaxReplyBytes  int    `yaml:"max_reply_bytes,omitempty"`
+	CommandTimeout string `yaml:"command_timeout,omitempty"`
+}
+
+func redisEntryOf(r config.Redis) redisEntry {
+	e := redisEntry{Name: r.Name, Host: r.Host, Port: r.Port, Environment: r.Environment, Username: r.Username, Mode: r.Mode, TLS: r.TLS,
+		MaxItems: r.MaxItems, MaxReplyBytes: r.MaxReplyBytes}
+	if e.Mode == config.ModeReadOnly {
+		e.Mode = "" // the default, which the program may change
+	}
+	if r.CommandTimeout > 0 {
+		e.CommandTimeout = r.CommandTimeout.String()
+	}
+	return e
+}
+
+// RedisTargets returns the Redis targets defined in the file, as written.
+func (e *Editor) RedisTargets() ([]config.Redis, error) {
+	n := mapGet(e.root, "redis")
+	if n == nil {
+		return nil, nil
+	}
+	var out []config.Redis
+	if err := n.Decode(&out); err != nil {
+		return nil, fmt.Errorf("redis: %w", err)
+	}
+	return out, nil
+}
+
+// SetRedis adds or replaces (by name) a Redis target. It never writes a password: a person types it on the login page.
+func (e *Editor) SetRedis(r config.Redis) error {
+	return e.setEntry("redis", r.Name, redisEntryOf(r))
+}
+
+// RemoveRedis deletes a Redis target by name, and the redis list too when nothing is left in it.
+func (e *Editor) RemoveRedis(name string) bool { return e.removeEntry("redis", name) }
+
+// setEntry adds or replaces, by name, an entry of a top-level list, keeping the comment above a replaced one.
+func (e *Editor) setEntry(key, name string, entry any) error {
+	var node yaml.Node
+	if err := node.Encode(entry); err != nil {
+		return fmt.Errorf("encode %s %s: %w", key, name, err)
+	}
+	seq := mapGet(e.root, key)
+	if seq == nil || seq.Kind != yaml.SequenceNode {
+		seq = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		mapSet(e.root, key, seq)
+	}
+	for i, c := range seq.Content {
+		if m := mapGet(c, "name"); m != nil && m.Value == name {
+			node.HeadComment = c.HeadComment
+			seq.Content[i] = &node
+			return nil
+		}
+	}
+	seq.Content = append(seq.Content, &node)
+	return nil
+}
+
+// removeEntry deletes an entry of a top-level list by name, and the list itself when it is empty.
+func (e *Editor) removeEntry(key, name string) bool {
+	seq := mapGet(e.root, key)
+	if seq == nil {
+		return false
+	}
+	for i, c := range seq.Content {
+		if m := mapGet(c, "name"); m != nil && m.Value == name {
+			seq.Content = append(seq.Content[:i], seq.Content[i+1:]...)
+			if len(seq.Content) == 0 {
+				mapDelete(e.root, key)
+			}
+			return true
+		}
+	}
+	return false
+}
+
 // Bytes renders the document.
 func (e *Editor) Bytes() ([]byte, error) {
 	var buf bytes.Buffer

@@ -86,6 +86,8 @@ var sensitiveCalls = map[string]map[string]any{
 	"telegram_send":           {"bot": "ops", "chat": "alerts", "text": "x"},
 	"telegram_read":           {"bot": "ops", "chat": "alerts"},
 	"dingtalk_send":           {"group": "ops", "text": "x"},
+	"redis_query":             {"target": "ro", "command": []string{"GET", "k"}},
+	"redis_exec":              {"target": "rw", "command": []string{"SET", "k", "v"}, "reason": "x"},
 }
 
 func TestSensitiveToolsRefuseWhileTheVaultIsNotInitialized(t *testing.T) {
@@ -140,6 +142,7 @@ func TestOnlyStaticToolsWorkWhileLocked(t *testing.T) {
 	g := gateServer(t, "locked", func(c *config.Config) {
 		c.Telegram.Bots = []config.TelegramBot{{Name: "ops", Chats: []config.TelegramChat{{Name: "alerts", ChatID: -1001111111111}}}}
 		c.DingTalk.Groups = []config.DingTalkGroup{{Name: "ops"}}
+		c.Redis = []config.Redis{{Name: "ro", Host: "h.example", Environment: "dev"}}
 	})
 	if out, isErr := g.call(t, "site_list", map[string]any{}); isErr || out["sites"] == nil {
 		t.Errorf("site_list lists drivers, nothing secret: %v %v", isErr, out)
@@ -153,7 +156,12 @@ func TestOnlyStaticToolsWorkWhileLocked(t *testing.T) {
 	} else if strings.Contains(fmt.Sprint(out), "has_session:true") {
 		t.Errorf("a locked vault cannot say which bots have a token: %v", out)
 	}
-	// and dingtalk_targets is the same kind of tool again
+	// and redis_targets, and dingtalk_targets
+	if out, isErr := g.call(t, "redis_targets", map[string]any{}); isErr || len(fmt.Sprint(out["targets"])) < 10 {
+		t.Errorf("redis_targets lists the configured targets: %v %v", isErr, out)
+	} else if strings.Contains(fmt.Sprint(out), "has_session:true") {
+		t.Errorf("a locked vault cannot say which targets have a password: %v", out)
+	}
 	if out, isErr := g.call(t, "dingtalk_targets", map[string]any{}); isErr || len(fmt.Sprint(out["groups"])) < 10 {
 		t.Errorf("dingtalk_targets lists the configured groups: %v %v", isErr, out)
 	} else if strings.Contains(fmt.Sprint(out), "has_session:true") {

@@ -68,7 +68,7 @@ Codes: `invalid_argument`, `unsupported_site`, `human_timeout` (nobody completed
 `rate_limited` (too many requests to people, or the site was just rejected; `retryable`, carries a hint not to loop),
 `bad_credentials`, `login_rejected` (site refused, e.g. account locked / captcha), `tunnel_unavailable`,
 `notify_failed` (DingTalk, or no webhook and `link_via_agent` off), `site_unreachable`, `ddl_disabled`, `sql_check_failed`, `archery_error`,
-`workflow_not_found`, `unknown_target`, `target_read_only`, `not_read_only`, `database_not_allowed`, `too_many_rows`, `statement_timeout`, `sql_error`, `session_expired` (a cached session was rejected by the site; call `session_open` with `force_refresh`), `internal`.
+`workflow_not_found`, `unknown_target`, `target_read_only`, `not_read_only`, `command_not_allowed`, `not_a_write`, `reply_too_large`, `command_timeout`, `database_not_allowed`, `too_many_rows`, `statement_timeout`, `sql_error`, `session_expired` (a cached session was rejected by the site; call `session_open` with `force_refresh`), `internal`.
 
 **Output schemas and titles.** Every tool advertises a human-readable `title` and an `outputSchema` (generated
 from the Go result types, so they cannot drift). The schemas list the fields of both the success and the
@@ -537,6 +537,46 @@ address list refused it: only the owner can change those), `content_refused` (an
 **What securl cannot do:** it cannot tell whether a webhook is right until a message is sent, cannot read or moderate a group, and cannot
 stop a person in the group from reading what the agent sends or from copying it elsewhere.
 
+## 11d. Redis: `redis_targets`, `redis_query`, `redis_exec`
+
+An agent can read a Redis server the owner named (`redis:`, made with `securl config redis add`), and change it only where the owner
+allowed. It names a target; it **never supplies a host, a port, a password, a user or a database**: an argument that is not in the schema
+is refused (`invalid_argument`). The password (and the ACL user name, which is in the configuration and is not a secret) is typed once by
+a person: `session_open` with `url: "redis://<target>"` sends the usual link and the page asks for the password in a secret field. A
+server with no password takes a single space. The password is kept in the vault and appears in no answer, error, audit line or message.
+Environments are `dev`, `test` and `staging`; production is refused when the configuration loads.
+
+The command is a list (`["GET", "key"]`), sent to the server as it is (RESP bulk strings), so no argument is parsed or split. securl
+checks it against two lists before anything is sent: reads (`GET`, `MGET`, `EXISTS`, `TTL`, `TYPE`, `SCAN`, `HGET`, `HGETALL`,
+`LRANGE`, `SMEMBERS`, `ZRANGE` and the like) and writes (`SET`, `DEL`, `INCR`, `HSET`, `EXPIRE` and the like). Never allowed in either: `FLUSHALL`
+and `FLUSHDB`, `CONFIG`, `EVAL` and every script, `KEYS` (use `SCAN`), `DEBUG`, `SHUTDOWN`, `REPLICAOF`, `MODULE`, `CLIENT`, `SUBSCRIBE`,
+every blocking command, `SORT` and `ZRANGE` with `STORE`. A command not on a list is refused (`command_not_allowed`), and the number of
+arguments, their size and a `SCAN` `COUNT` are limited.
+
+`redis_targets` (no input) answers `{targets: [{name, environment, mode, has_session, max_items, max_reply_bytes}]}`. It makes no
+request and works while the vault is locked (`has_session` is then `false`).
+
+`redis_query` takes `{target, command}` and answers `{value, truncated?, redactions, untrusted, notice}`. It is for **reads on every
+target**, a writable one included: a write is refused here (`target_read_only` on a read-only target, `not_read_only` on a writable one,
+which says to use `redis_exec`). The value is returned as data (a string, an integer, null or a list), arrays are cut at `max_items`
+(`truncated`), the password is scrubbed from it, and `untrusted: "true"` with a `notice` in securl's own words says that what a key holds
+was written by somebody and is never an instruction.
+
+`redis_exec` takes `{target, command, reason}` and answers `{value, redactions, notified}`. It needs a target whose `mode` is
+`read_write` (`target_read_only` otherwise), a `reason` (the team reads it), and a command that changes data (`not_a_write` otherwise).
+The team is told in DingTalk after the change: the command name and how many arguments it had, **never a key or a value**.
+
+Both tools are audited by the **name of the command and the number of arguments** (`redis_query`, `redis_exec`: target, command, key
+count), never a key or a value. A bad password ends the session (`session_expired`); a timeout or a server that cannot be reached keeps
+it (`command_timeout`, `site_unreachable`). A host on this machine needs `security.allow_local_addresses`.
+
+Errors: `vault_locked`, `vault_not_initialized`, `unknown_target`, `no_session`, `session_expired`, `command_not_allowed`,
+`target_read_only`, `not_read_only`, `not_a_write`, `invalid_argument`, `redis_error` (the server's own error, without the password),
+`reply_too_large`, `command_timeout`, `site_unreachable`, `host_not_allowed`.
+
+**What securl cannot do:** it cannot tell whether a host really is not production, and an agent can read whatever the password can. The
+boundary that holds is what the password (or the ACL user) is allowed to do: give it only what an agent may do there.
+
 ## 12. Human-facing side effects (summary)
 
 | Tool | DingTalk message |
@@ -546,6 +586,8 @@ stop a person in the group from reading what the agent sends or from copying it 
 | `session_close` | confirmation link naming the saved sessions to forget; nothing closes before confirmation |
 | `archery_run_sql` | one after submit: title, instance/db, SQL summary (first 500 chars), Archery workflow link — to the same robot (approval itself happens in Archery) |
 | `db_exec` | database-change/rollback notification when the change runs |
+| `redis_exec` | one after the change: target, command name and argument count (never a key or a value), the agent's `reason` |
+| `redis_query` | none (audited) |
 | `telegram_send` | none to DingTalk; the message itself goes to the Telegram chat, with a first line that says an AI agent sent it |
 | `session_open` with `telegram://<bot>` | one: the bot name and which chats the token will let an agent use |
 | others | none unless they first need a site login |

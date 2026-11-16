@@ -372,6 +372,26 @@ Things to know: the group sees what the agent posts, behind a line that says an 
 plain text, so links are not clickable markup; a robot's own security settings can refuse a message (`refused_by_robot`: only you can
 change them); and no message text is in the audit log (`grep dingtalk audit.jsonl` shows the group, sizes and hashes).
 
+### Redis: letting an agent read (and, if you allow it, change) a server
+
+An agent names a Redis target you wrote down; it never gives a host or a password. By default it can only **read**, with a short list of
+commands (no `KEYS`, no scripts, no `CONFIG`, no `FLUSHALL`).
+
+1. **Tell securl.** `securl config redis add` (guided) or
+   `securl config redis add --name cache --host redis.dev.example --environment dev --tls disable`. Environments are `dev`, `test` and
+   `staging`; production is refused. `--username` is for a Redis 6 ACL user (a name, not a secret). `--tls` is `verify` (default),
+   `skip-verify` or `disable` (an ElastiCache or a Redis with no TLS). `--mode read_write` together with `--yes-allow-writes` lets the
+   agent change data through `redis_exec`; the team is told in DingTalk each time (the command, never a key or a value).
+   `--max-items`, `--max-reply-bytes` and `--command-timeout` bound what one command returns and how long it takes.
+2. **Type the password once.** The agent calls `session_open` with `redis://cache`; you get the usual link and type the password (a
+   server with no password takes a single space). It is checked with `AUTH` and `PING` and kept in the vault. `session_close` with the same
+   URL forgets it, after you confirm.
+3. **Give the password only the rights an agent should have.** The allowlist stops mistakes; what the password may do is the boundary
+   that holds. A Redis 6 ACL user limited to read commands on a key prefix is better than the default user. A host on this machine
+   needs `security.allow_local_addresses: true`.
+
+`grep redis audit.jsonl` shows the target, the command name and how many arguments it had; never a key or a value.
+
 ## 8. Not supported (yet)
 
 GitLab reCAPTCHA after repeated failures; WebAuthn/passkey-only accounts; Jenkins 2FA plugins; any TOTP on Kibana

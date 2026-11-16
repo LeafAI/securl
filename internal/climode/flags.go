@@ -23,6 +23,7 @@ const (
 	kJSON                 // --name '{"any":"json"}'
 	kStrMap               // --name key=value, repeated: a map of strings
 	kMultiMap             // --name key=value, repeated: a value, or a list when a key repeats
+	kStrList              // --name value, repeated: a list of strings, in the order given
 )
 
 type field struct {
@@ -97,6 +98,11 @@ func kindOf(s *jsonschema.Schema) (kind, error) {
 		return kInt, nil
 	case "boolean":
 		return kBool, nil
+	case "array":
+		if s.Items != nil && s.Items.Type == "string" {
+			return kStrList, nil
+		}
+		return 0, fmt.Errorf("a list of anything but strings has no flag")
 	case "object":
 		if s.AdditionalProperties != nil && len(s.AdditionalProperties.AnyOf) > 0 {
 			return kMultiMap, nil
@@ -188,6 +194,13 @@ func (c *command) set(out map[string]any, f *field, raw string, stdin io.Reader)
 			return fmt.Errorf("not valid JSON: %v", err)
 		}
 		out[f.name] = any
+	case kStrList:
+		v, err := textValue(raw, stdin)
+		if err != nil {
+			return err
+		}
+		prev, _ := out[f.name].([]any)
+		out[f.name] = append(append(make([]any, 0, len(prev)+1), prev...), v)
 	case kStrMap, kMultiMap:
 		k, v, ok := strings.Cut(raw, "=")
 		if !ok || k == "" {
@@ -256,6 +269,8 @@ func (c *command) help() string {
 		case kBool:
 		case kJSON:
 			line += " JSON"
+		case kStrList:
+			line += " string  (repeat it: once for each item, in order)"
 		case kStrMap, kMultiMap:
 			line = "  --" + strings.TrimSuffix(f.flag, "s") + " name=value"
 		}

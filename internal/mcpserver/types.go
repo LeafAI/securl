@@ -378,3 +378,43 @@ type DBExecOutput struct {
 	RowsAffected int64 `json:"rows_affected"`
 	Notified     bool  `json:"notified"`
 }
+
+// RedisTargetsOutput lists the Redis servers the owner has made reachable. A server is named, and where it is and what opens it are
+// not here: an agent names things, it does not learn what would let it act outside securl.
+type RedisTargetsOutput struct {
+	Targets []RedisTargetInfo `json:"targets"`
+}
+
+type RedisTargetInfo struct {
+	Name        string `json:"name"`
+	Environment string `json:"environment"`
+	Mode        string `json:"mode"`        // read_only | read_write
+	HasSession  bool   `json:"has_session"` // a person has typed the password
+	MaxItems    int    `json:"max_items"`   // elements of a reply an agent is given
+	MaxReply    int    `json:"max_reply_bytes"`
+}
+
+type RedisQueryInput struct {
+	Target  string   `json:"target" jsonschema:"A target name from redis_targets."`
+	Command []string `json:"command" jsonschema:"One read command as a list: the command first, then each argument, like [\"GET\", \"key\"] or [\"LRANGE\", \"list\", \"0\", \"9\"]. Only a short list of reads is allowed; there is no KEYS (use SCAN), no scripts and no blocking command."`
+}
+
+type RedisQueryOutput struct {
+	Value      any    `json:"value"`
+	Truncated  bool   `json:"truncated,omitempty"`
+	Redactions int    `json:"redactions"`
+	Untrusted  string `json:"untrusted"`
+	Notice     string `json:"notice"`
+}
+
+type RedisExecInput struct {
+	Target  string   `json:"target" jsonschema:"A target name from redis_targets whose mode is read_write."`
+	Command []string `json:"command" jsonschema:"One command that changes data, as a list: like [\"SET\", \"key\", \"value\"] or [\"DEL\", \"key\"]. Only ordinary writes are allowed; never FLUSHALL, CONFIG, EVAL or KEYS."`
+	Reason  string   `json:"reason" jsonschema:"Why this change is made. The team reads it in DingTalk after the change."`
+}
+
+type RedisExecOutput struct {
+	Value      any  `json:"value"`
+	Redactions int  `json:"redactions"`
+	Notified   bool `json:"notified"`
+}

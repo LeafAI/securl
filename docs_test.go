@@ -18,7 +18,7 @@ func realTools(t *testing.T) map[string]bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	have := map[string]bool{"dingtalk_targets": true, "dingtalk_send": true, "telegram_targets": true, "telegram_send": true, "telegram_read": true, "archery_instances": true, "archery_groups": true, "archery_query": true, "archery_run_sql": true,
+	have := map[string]bool{"dingtalk_targets": true, "dingtalk_send": true, "telegram_targets": true, "telegram_send": true, "telegram_read": true, "redis_targets": true, "redis_query": true, "redis_exec": true, "archery_instances": true, "archery_groups": true, "archery_query": true, "archery_run_sql": true,
 		"archery_wait": true, "archery_workflow_status": true, "archery_cancel": true}
 	for _, m := range regexp.MustCompile(`= "([a-z_]+)"`).FindAllStringSubmatch(string(b), -1) {
 		have[m[1]] = true
@@ -26,14 +26,14 @@ func realTools(t *testing.T) map[string]bool {
 	return have
 }
 
-var toolish = regexp.MustCompile("`((?:session|site|vault|archery|db|telegram|dingtalk)_[a-z_]+)`")
+var toolish = regexp.MustCompile("`((?:session|site|vault|archery|db|telegram|dingtalk|redis)_[a-z_]+)`")
 
 func TestEveryToolTheDocumentsNameExists(t *testing.T) {
 	have := realTools(t)
 	// Error codes, fields and configuration keys that share a prefix with the tools: they are not tools.
 	notTools := map[string]bool{
 		"session_expired": true, "vault_locked": true, "vault_not_initialized": true, // error codes
-		"site_unreachable": true, "archery_error": true, // error codes
+		"site_unreachable": true, "archery_error": true, "redis_error": true, // error codes
 		"site_options": true, "archery_ddl_allowed": true, "archery_requests_allowed": true, // configuration key and policy fields
 		"archery_submit_sql": true,                                                                   // named in order to say it does not exist
 		"session_dropped":    true, "session_close_requested": true, "session_close_confirmed": true, // audit events
