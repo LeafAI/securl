@@ -193,7 +193,6 @@ Use `securl doctor -site <url>` for every site before the first login. It needs 
 | Nightingale v7 | `nightingale` | none. A captcha, if enabled, appears in the login step. |
 | Kibana | `kibana` | `roots:` for `server.basePath`. The login provider is discovered. |
 | Archery 1.12.0 | `archery` | `archery.default_group` (resource group name); `roots:` if under a path. |
-| RocketMQ Dashboard 2.x | `rocketmq` | Log in with a **normal** (non-admin) Dashboard account that is used for nothing else: this Dashboard takes the password in the URL query, so a gateway or the Dashboard may log it. The request tool lets through `GET` of `.query` paths only and never a message body; `site_options.rocketmq.allow_message_body: "yes"` opens `/message/`, `/messageTrace/` and `/dlqMessage/`. |
 | SkyWalking (no login) | `skywalking` | none. |
 | Any site behind an OAuth 2.0 front with GitLab as the identity provider (an AWS ALB `authenticate-oidc` action, oauth2-proxy), e.g. SkyWalking | `oauth2_sites:` entry | `idp.url` (the GitLab address) is required and is the only host a GitLab password is ever sent to. See below. |
 
