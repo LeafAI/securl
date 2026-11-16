@@ -58,6 +58,7 @@ internal/
   telegram/ telegramsite/    # Bot API client + bounded inbox; the bot-token login driver (telegram://<bot>)
   dingtalk/ dingtalksite/    # custom-robot client (send only); the webhook login driver (dingtalk://<group>)
   slidewindow/               # the per-bot send limit
+  redisx/ redissite/         # RESP2 client + command policy; the password login driver (redis://<target>)
     generic/                 # declarative form/JSON login driven by YAML (any other site)
   session/                   # cache, singleflight per host, validity probe
   config/                    # ~/.config/securl/config.yaml + env overrides
@@ -299,6 +300,7 @@ they were; the first is audited as `session_dropped`.
 | `session_list` | – | cached hosts + expiry (no secrets) |
 | `session_close` | `url` or `all`, `close_id?` | drops the named sessions after a person typed `DELETE` on a page |
 | `dingtalk_targets` / `dingtalk_send` | `group`, `text` | the configured groups; `{sent}`. Send only, no read (section 8) |
+| `redis_targets` / `redis_query` / `redis_exec` | `target` / `target`, `command[]` / + `reason` | the configured servers; the value of one allowlisted command, marked untrusted; a change, with a note to the team |
 | `telegram_targets` / `telegram_send` / `telegram_read` | `bot`, `chat`, `text` / `limit?`, `wait_seconds?` | the configured bots and chats; `{sent, message_id}`; messages marked untrusted (see section 8) |
 | `archery_query` | `url`, `instance`, `db`, `sql`, `limit` | rows (read-only query endpoint, no approval) |
 | `archery_run_sql` | `url`, `instance`, `db`, `sql`, `remark`, `wait_timeout_s?` | execution result (sync) |
@@ -406,6 +408,16 @@ MCP registration: `claude mcp add login -- login`.
   It does **not** defend against another process of the same user, by design: such a process can already read the user's files,
   attach a debugger to the daemon, and read its memory. If that is in your threat model, do not run a daemon.
 
+- **Redis is a data store other programs write into.** An agent names a configured target and sends a command; it never gives an
+  address, a credential or a database number, and an argument outside the schema is refused. The password is typed on the page and
+  lives in the vault; it is in no answer, error, audit line or message, and a value that happens to hold it is scrubbed.
+  - *What an agent may run.* The command is a list sent as it is, checked against an allowlist of reads (and of writes, on a
+    `read_write` target only): no `KEYS`, scripts, `CONFIG`, `FLUSH*`, `DEBUG`, `SHUTDOWN`, replication, modules, `CLIENT`, pub/sub or
+    blocking commands, and limits on the arguments, a reply's size and elements. `redis_query` refuses a write even on a writable
+    target; `redis_exec` needs a reason, is audited by command name and argument count (never a key or a value) and tells the team.
+    What a key holds is marked untrusted in securl's words: a value can say "ignore your instructions", and the model is told it is data.
+  - *What is not defended:* the credential's own reach. securl cannot tell that a host really is not production. Give the password
+    only what an agent may do or see; that is the boundary that holds.
 - **Telegram is a channel other people write into, and one other people read.** `telegram_*` tools let an agent speak in, and read
   from, the chats the owner named, through a bot. What is defended, and what is not:
   - *What an agent may reach.* It names a configured bot and a configured chat. It never gives a chat id, a token, an API address, a

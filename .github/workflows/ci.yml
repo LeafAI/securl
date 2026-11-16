@@ -32,6 +32,10 @@ jobs:
     env:
       SECURL_TEST_PG: 127.0.0.1:5432
       SECURL_TEST_MYSQL: 127.0.0.1:3306
+      # The throwaway Redis servers that the next steps start (scripts/redistest).
+      SECURL_TEST_REDIS: 127.0.0.1:36379
+      SECURL_TEST_REDIS_PW: 127.0.0.1:36380
+      SECURL_TEST_REDIS_PASSWORD: T3st-Pass-9x
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -51,6 +55,9 @@ jobs:
           sleep 3
           PGPASSWORD=rootpw psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -f scripts/dbtest/postgres.sql
           mysql -h 127.0.0.1 -uroot -prootpw appdb < scripts/dbtest/mysql.sql
+      # Two real Redis servers (one with no password, one with): the loopback only, a fixed public test password.
+      - name: Start Redis
+        run: scripts/redistest/up.sh
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test -race ./...

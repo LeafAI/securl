@@ -19,6 +19,7 @@ import (
 	"github.com/LeafAI/securl/internal/flow"
 	"github.com/LeafAI/securl/internal/keyring"
 	"github.com/LeafAI/securl/internal/ratelimit"
+	"github.com/LeafAI/securl/internal/redissite"
 	"github.com/LeafAI/securl/internal/session"
 	"github.com/LeafAI/securl/internal/site"
 	"github.com/LeafAI/securl/internal/telegramsite"
@@ -129,6 +130,12 @@ func (s *Server) scopeOf(c *core, in LogoutInput) (closeScope, *ToolError) {
 		base = b
 	} else if strings.HasPrefix(strings.ToLower(in.URL), telegramsite.Scheme+":") {
 		_, b, terr := s.telegramTarget(in.URL)
+		if terr != nil {
+			return closeScope{}, terr
+		}
+		base = b
+	} else if strings.HasPrefix(strings.ToLower(in.URL), redissite.Scheme+":") {
+		_, b, terr := s.redisTarget(in.URL)
 		if terr != nil {
 			return closeScope{}, terr
 		}
@@ -358,6 +365,15 @@ func closeDetail(keys []string) string {
 	}
 	if bots > 0 {
 		d += fmt.Sprintf(" %d of them are Telegram bots (telegram://): the bot token a person typed is not kept anywhere else, and must be typed again (BotFather can show it again).", bots)
+	}
+	var servers int
+	for _, n := range names {
+		if strings.HasPrefix(n, redissite.Scheme+"://") {
+			servers++
+		}
+	}
+	if servers > 0 {
+		d += fmt.Sprintf(" %d of them are Redis servers (redis://): the password a person typed is not kept anywhere else, and must be typed again.", servers)
 	}
 	if hooks > 0 {
 		d += fmt.Sprintf(" %d of them are DingTalk groups (dingtalk://): the robot webhook a person typed is not kept anywhere else, and must be pasted again from the robot's settings in DingTalk.", hooks)

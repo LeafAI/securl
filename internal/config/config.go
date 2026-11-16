@@ -44,6 +44,8 @@ type Config struct {
 	OAuth2Sites []oauth2flow.Spec `yaml:"oauth2_sites"`
 	// Databases lists the PostgreSQL and MySQL databases an agent may run SQL against (non-production only).
 	Databases []Database `yaml:"databases"`
+	// Redis lists the Redis servers an agent may use, by name. Their passwords are typed on a page and kept in the vault.
+	Redis []Redis `yaml:"redis"`
 	// Telegram lists the bots, and the chats of each, that an agent may send to and read from.
 	Telegram Telegram `yaml:"telegram"`
 	Daemon   Daemon   `yaml:"daemon"`
@@ -187,6 +189,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := c.Telegram.validate(); err != nil {
+		return err
+	}
+	if err := validateRedis(c.Redis); err != nil {
 		return err
 	}
 	if err := validateDingTalkGroups(c.DingTalk.Groups); err != nil {

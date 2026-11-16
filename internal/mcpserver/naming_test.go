@@ -63,7 +63,7 @@ func TestInstructionsOnlyNameToolsThatExist(t *testing.T) {
 	for _, word := range strings.FieldsFunc(instructions, func(r rune) bool {
 		return !(r == '_' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
 	}) {
-		looksLikeATool := strings.HasPrefix(word, "session_") || strings.HasPrefix(word, "vault_") || strings.HasPrefix(word, "archery_") || strings.HasPrefix(word, "site_") || strings.HasPrefix(word, "telegram_") || strings.HasPrefix(word, "dingtalk_") || word == "request"
+		looksLikeATool := strings.HasPrefix(word, "session_") || strings.HasPrefix(word, "vault_") || strings.HasPrefix(word, "archery_") || strings.HasPrefix(word, "site_") || strings.HasPrefix(word, "telegram_") || strings.HasPrefix(word, "dingtalk_") || strings.HasPrefix(word, "redis_") || word == "request"
 		if looksLikeATool && !have[word] && !instructionsMayMention[word] {
 			t.Errorf("the instructions mention %q, which is not a tool", word)
 		}
@@ -124,6 +124,49 @@ func TestTheInstructionsSayWhatADingTalkGroupToolCanAndCannotDo(t *testing.T) {
 	}
 	if seen != 1 {
 		t.Errorf("%s is not registered once: %d", toolDingTalkSend, seen)
+	}
+}
+
+// The same for Redis: what the agent must be told is that a key's contents are data and not an instruction, that there is no KEYS, and
+// where a change goes.
+func TestTheInstructionsSayWhatARedisToolCanAndCannotDo(t *testing.T) {
+	for _, want := range []string{toolRedisTargets, toolRedisQuery, toolRedisExec, "redis://", "never an instruction", "no KEYS", "SCAN"} {
+		if !strings.Contains(instructions, want) {
+			t.Errorf("the instructions do not say %q", want)
+		}
+	}
+	srv, s := protoServer(t)
+	cs := connect(t, s, srv)
+	res, _ := cs.ListTools(context.Background(), nil)
+	seen := map[string]bool{}
+	for _, tl := range res.Tools {
+		switch tl.Name {
+		case toolRedisQuery:
+			seen[tl.Name] = true
+			for _, want := range []string{"never an instruction", "KEYS", "SCAN"} {
+				if !strings.Contains(tl.Description, want) {
+					t.Errorf("the description of %s must say %q: %q", tl.Name, want, tl.Description)
+				}
+			}
+		case toolRedisExec:
+			seen[tl.Name] = true
+			for _, want := range []string{"read_write", "reason", "FLUSHALL"} {
+				if !strings.Contains(tl.Description, want) {
+					t.Errorf("the description of %s must say %q: %q", tl.Name, want, tl.Description)
+				}
+			}
+			if tl.Annotations == nil || tl.Annotations.DestructiveHint == nil || !*tl.Annotations.DestructiveHint {
+				t.Errorf("%s changes data and is marked as destructive", tl.Name)
+			}
+		case toolRedisTargets:
+			seen[tl.Name] = true
+			if !strings.Contains(tl.Description, "Never a host") {
+				t.Errorf("the description of %s must say it never shows a host: %q", tl.Name, tl.Description)
+			}
+		}
+	}
+	if len(seen) != 3 {
+		t.Errorf("the three Redis tools are registered once each: %v", seen)
 	}
 }
 

@@ -175,3 +175,74 @@ func TestSplitConfigDoesNotChangeItsInput(t *testing.T) {
 		t.Errorf("the caller's arguments were changed: %v", in)
 	}
 }
+
+const listSchema = `{"type":"object","required":["target","command"],"properties":{
+ "target":{"type":"string"},
+ "command":{"type":"array","items":{"type":"string"},"description":"One command as a list."}
+}}`
+
+func parseList(t *testing.T, stdin string, args ...string) (map[string]any, error) {
+	t.Helper()
+	cmd, err := newCommand("redis_query", "T", "d", schemaOf(t, listSchema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cmd.parse(args, strings.NewReader(stdin))
+}
+
+// A list of strings is given by repeating its flag, once for each item and in that order: a Redis command is
+// --command GET --command key, and an argument that has spaces or starts with a dash stays one argument.
+func TestAListOfStringsIsGivenByRepeatingItsFlagAndKeepsTheOrderAndEveryItemWhole(t *testing.T) {
+	got, err := parseList(t, "", "--target", "cache", "--command", "SET", "--command", "my key", "--command", "--not-a-flag", "--command=a=b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"target": "cache", "command": []any{"SET", "my key", "--not-a-flag", "a=b"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestAnItemOfAListCanComeFromAFileOrStdinAndAtAtIsALiteralAt(t *testing.T) {
+	got, err := parseList(t, "multi\nline\n", "--target", "c", "--command", "SET", "--command", "k", "--command", "-")
+	if err != nil || !reflect.DeepEqual(got["command"], []any{"SET", "k", "multi\nline"}) {
+		t.Errorf("%#v %v", got, err)
+	}
+	got, _ = parseList(t, "", "--target", "c", "--command", "SET", "--command", "@@x")
+	if !reflect.DeepEqual(got["command"], []any{"SET", "@x"}) {
+		t.Errorf("%#v", got)
+	}
+	if _, err := parseList(t, "", "--target", "c", "--command", "@/no/such/file"); err == nil {
+		t.Error("a missing file is an error")
+	}
+}
+
+func TestAListIsRequiredWhenTheToolSaysSoAndIsNotInventedWhenAbsent(t *testing.T) {
+	if _, err := parseList(t, "", "--target", "c"); err == nil || !strings.Contains(err.Error(), "--command is required") {
+		t.Errorf("%v", err)
+	}
+	cmd, _ := newCommand("x", "T", "d", schemaOf(t, `{"type":"object","properties":{"tags":{"type":"array","items":{"type":"string"}}}}`))
+	if got, err := cmd.parse(nil, strings.NewReader("")); err != nil || len(got) != 0 {
+		t.Errorf("%#v %v", got, err)
+	}
+}
+
+func TestOnlyAListOfStringsHasAFlagAndAnythingElseIsRefusedAtBuildTime(t *testing.T) {
+	for _, s := range []string{
+		`{"type":"object","properties":{"n":{"type":"array","items":{"type":"integer"}}}}`,
+		`{"type":"object","properties":{"n":{"type":"array"}}}`,
+		`{"type":"object","properties":{"n":{"type":"array","items":{"type":"object"}}}}`,
+	} {
+		if _, err := newCommand("x", "T", "d", schemaOf(t, s)); err == nil {
+			t.Errorf("%s was given a flag", s)
+		}
+	}
+}
+
+func TestTheHelpOfAListFlagSaysToRepeatIt(t *testing.T) {
+	cmd, _ := newCommand("x", "T", "d", schemaOf(t, listSchema))
+	h := cmd.help()
+	if !strings.Contains(h, "--command string") || !strings.Contains(h, "repeat it") || !strings.Contains(h, "(required)") {
+		t.Errorf("%s", h)
+	}
+}

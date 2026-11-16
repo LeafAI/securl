@@ -49,6 +49,9 @@ const usage = `usage: securl config <command> [-config file]
   dingtalk group add [flags] guided setup of one DingTalk group an agent may send to (its robot's webhook is pasted by a person, never here)
   dingtalk group list        show configured groups
   dingtalk group remove <name>  forget a group
+  redis add [flags]          guided setup of one Redis server (dev, test or staging), or give the answers as flags
+  redis list                 show configured Redis targets
+  redis remove <name>        forget a Redis target
   show                       print the configuration (secrets are masked)
   get <key>                  print one setting         (-reveal shows secrets)
   set [key [value]]          change one setting; without arguments lists every setting
@@ -88,6 +91,8 @@ func Run(args []string, env Env) int {
 		err = cmdDB(env, rest)
 	case "telegram":
 		err = cmdTelegram(env, rest)
+	case "redis":
+		err = cmdRedis(env, rest)
 	case "dingtalk":
 		err = cmdDingTalk(env, rest)
 	default:
