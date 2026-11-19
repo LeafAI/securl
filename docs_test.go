@@ -133,3 +133,30 @@ func TestTheDocumentsSayThatAChannelIsReadAndThatTheBotMustBeItsAdministrator(t 
 		}
 	}
 }
+
+// The flag that makes one process serve stdio and the socket is a flag of the program, and the documents that name it must name one the
+// program has: a document that sends somebody to a flag that does not exist is worse than none.
+func TestTheDaemonFlagTheDocumentsNameIsOneTheProgramHas(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), `flag.Bool("daemon"`) {
+		t.Fatal("main.go has no -daemon flag, and the documents say it has")
+	}
+	for _, f := range []string{"skills/securl/SKILL.md", "docs/OPERATING.md", "README.md", "DESIGN.md"} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), "--daemon") {
+			t.Errorf("%s does not say that `securl --daemon` exists", f)
+		}
+	}
+	skill, _ := os.ReadFile("skills/securl/SKILL.md")
+	for _, must := range []string{"off by default", "one vault", "already listening"} {
+		if !strings.Contains(string(skill), must) {
+			t.Errorf("the skill does not say %q about --daemon", must)
+		}
+	}
+}

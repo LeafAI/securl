@@ -409,6 +409,11 @@ MCP registration: `claude mcp add login -- login`.
     in a process of its own.
   It does **not** defend against another process of the same user, by design: such a process can already read the user's files,
   attach a debugger to the daemon, and read its memory. If that is in your threat model, do not run a daemon.
+  - **`securl --daemon` is the same exposure in the MCP server's own process.** It serves stdio and the socket from one server, so
+    the vault the agent opened is open for every process of the user for as long as that process lives, and the other way round. It
+    is off by default, and the exposure is the daemon's, not a new one: the same socket, the same checks, the same tools. What it
+    adds is that an unlock for one is an unlock for both, which is the point of the flag, and so it is not for someone who wants the
+    agent's server and the command line kept apart. The process stops when stdio ends or on SIGTERM and locks the vault as it goes.
 
 - **Redis and RocketMQ are data stores other programs write into.** An agent names a configured target and sends a command (Redis) or
   names a topic (RocketMQ); it never gives an address, a credential, a consumer group or an offset, and an argument outside the schema is
