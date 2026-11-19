@@ -468,3 +468,92 @@ func TestTheServerAsksForTheCodesBetweenTheLinkAndNow(t *testing.T) {
 		t.Errorf("the span ends at %v, want now (%v)", f.to, e.srv.now())
 	}
 }
+
+// The page may read the final state before the owner has said what to do when it does: the login ends, the status becomes final, and
+// the page polls, all before the owner gets to register its callback. That read must not be lost: a callback registered after it runs
+// at once, since the page has already seen the end, and the tunnel is not left up until the long cap for a read that already happened.
+func TestAFinalStateReadBeforeTheCallbackIsRegisteredIsNotLost(t *testing.T) {
+	e := setup(t)
+	r := e.srv.NewRoundFor(site, "login", 1)
+	r.SetStatus(StateFailed, "x")
+	resp, err := http.Get(e.base + "/" + r.Token + "/status") // the page reads the end first
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	n := 0
+	r.OnFinalRead(func() { n++ }) // and only then is the callback registered
+	if n != 1 {
+		t.Fatalf("the callback ran %d times: the final state had been read already, so it must run once, at registration", n)
+	}
+}
+
+// A state that is not final, read before the callback is registered, is not a final read, so the callback waits for the real one.
+func TestAReadOfAStateThatIsNotFinalBeforeTheCallbackIsRegisteredDoesNotRunIt(t *testing.T) {
+	e := setup(t)
+	r := e.srv.NewRoundFor(site, "login", 1)
+	resp, _ := http.Get(e.base + "/" + r.Token + "/status") // waiting
+	resp.Body.Close()
+	n := 0
+	r.OnFinalRead(func() { n++ })
+	if n != 0 {
+		t.Fatalf("the callback ran %d times for a read of a state that is not final", n)
+	}
+	r.SetStatus(StateDone, "")
+	resp, _ = http.Get(e.base + "/" + r.Token + "/status")
+	resp.Body.Close()
+	if n != 1 {
+		t.Fatalf("the callback ran %d times after the final state was read, want 1", n)
+	}
+}
+
+// A read that was already delivered to a callback is not replayed to the next one registered: a round's end is read once.
+func TestAFinalReadThatWasDeliveredIsNotReplayedToALaterCallback(t *testing.T) {
+	e := setup(t)
+	r := e.srv.NewRoundFor(site, "login", 1)
+	first := 0
+	r.OnFinalRead(func() { first++ })
+	r.SetStatus(StateDone, "")
+	resp, _ := http.Get(e.base + "/" + r.Token + "/status")
+	resp.Body.Close()
+	second := 0
+	r.OnFinalRead(func() { second++ })
+	if first != 1 || second != 0 {
+		t.Fatalf("first ran %d times (want 1) and second %d (want 0): a read is delivered once", first, second)
+	}
+}
+
+// A read that was remembered is told once, to the first callback that comes after it; the next callback waits for a read of its own.
+func TestARememberedFinalReadIsToldToOneLateCallbackOnly(t *testing.T) {
+	e := setup(t)
+	r := e.srv.NewRoundFor(site, "login", 1)
+	r.SetStatus(StateDone, "")
+	resp, _ := http.Get(e.base + "/" + r.Token + "/status")
+	resp.Body.Close()
+	first, second := 0, 0
+	r.OnFinalRead(func() { first++ })
+	r.OnFinalRead(func() { second++ })
+	if first != 1 || second != 0 {
+		t.Fatalf("the remembered read went to the first late callback (ran %d times) and not to the second (ran %d times)", first, second)
+	}
+	resp, _ = http.Get(e.base + "/" + r.Token + "/status") // a read of its own
+	resp.Body.Close()
+	if second != 1 {
+		t.Errorf("the second callback ran %d times for a read made after it was registered, want 1", second)
+	}
+}
+
+// Taking a callback away (nil) is not a way to use up a remembered read: it is still there for the next real callback.
+func TestRegisteringNoCallbackDoesNotUseUpARememberedRead(t *testing.T) {
+	e := setup(t)
+	r := e.srv.NewRoundFor(site, "login", 1)
+	r.SetStatus(StateDone, "")
+	resp, _ := http.Get(e.base + "/" + r.Token + "/status")
+	resp.Body.Close()
+	r.OnFinalRead(nil)
+	n := 0
+	r.OnFinalRead(func() { n++ })
+	if n != 1 {
+		t.Fatalf("the remembered read was used up by registering nothing: the callback ran %d times", n)
+	}
+}
