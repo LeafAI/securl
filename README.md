@@ -324,6 +324,15 @@ exists only while a person is being asked.
   one, and audited (size and hash, never the text). **What an agent reads there was written by other people**, and every read says so;
   that lowers the risk of an instruction hidden in a group message and does not remove it. Reading is on by default and can be
   switched off per chat (`read: false`). `docs`: DESIGN.md, "Threat model", says what is and is not defended.
+- **Zulip** (`zulip:`) lets an agent speak in, and read from, the channels the owner names, through a bot, one entry per server. The agent
+  names a server and a channel; it never supplies a site, an email, a key, a recipient or Zulip's own name for a channel, and there are
+  no direct messages. **The topic is the agent's to choose**, because a topic is a conversation: it is one line of at most 60 characters
+  and everyone in the channel sees it. The bot's API key is typed by a person on the usual page and kept in the vault, and is in no
+  answer, error, audit line or message; it goes only to the configured `https://` site. Text goes out behind a first paragraph that
+  securl writes and the agent cannot change, saying an AI agent sent it and from which machine; **nobody can be mentioned** (`@**name**`,
+  `@**all**` and the like are refused, not edited); sends are limited per server, not confirmed one by one, and audited (size and hash,
+  never the text or the topic). **What an agent reads there, topics and names included, was written by other people**, and every read says
+  so. A read keeps no state: the agent passes the last `message_id` to read on. `docs`: DESIGN.md, "Threat model".
 - **DingTalk groups** (`dingtalk.groups:`) let an agent send to the groups the owner names, each through a custom robot of that group.
   **Send only**: a custom robot cannot read a group, so there is no tool that does. The agent names a group; it never supplies a
   webhook, an address, a mention or a message type. The robot's webhook (and its signing secret, if it signs) is pasted by a person on
@@ -473,6 +482,16 @@ telegram:                    # bots an agent may talk through; `securl config te
       # send_limit: 20       # messages the bot sends per send_window, across all its chats
       # send_window: 1m
       # read_messages: 50    # what one read returns when the call gives no limit (at most 100)
+zulip:                       # Zulip servers an agent may talk through; `securl config zulip add` writes this
+  - name: team               # what an agent calls it; the KEY is never here: a person types it at the first session_open
+    site: https://yourorg.zulipchat.com   # https only, and never an address on this machine; the one place the key is sent
+    email: robot-bot@yourorg.zulipchat.com   # the bot's email (a Generic bot)
+    channels:                # the only channels the agent can use; it names them and never a topic here: it chooses the topic
+      - {name: dev, channel: Dev Team}
+      - {name: news, channel: announce, send: false}   # read: false / send: false switch one direction off
+    # send_limit: 20         # messages the bot sends per send_window, across all its channels
+    # send_window: 1m
+    # read_messages: 50      # what one read returns when the call gives no limit (at most 100)
 audit:
   enabled: true              # default; JSON lines (who/what/when, never secrets) in audit.jsonl next to this file
 limits:                      # protect people from request floods; only requests that reach a person count
@@ -516,7 +535,7 @@ Every tool has a title and an output schema. Read-only resources: `securl://site
 
 `vault_status`, `vault_unlock`, `session_open`, `session_wait`, `site_list`, `session_list`, `session_close`, `archery_instances`, `archery_groups`, `archery_query`,
 `archery_run_sql`, `archery_wait`, `archery_workflow_status`, `archery_cancel`, `db_targets`, `db_query`, `db_exec`,
-`telegram_targets`, `telegram_send`, `telegram_read`, `dingtalk_targets`, `dingtalk_send`, `redis_targets`, `redis_query`, `redis_exec`,
+`telegram_targets`, `telegram_send`, `telegram_read`, `zulip_targets`, `zulip_send`, `zulip_read`, `dingtalk_targets`, `dingtalk_send`, `redis_targets`, `redis_query`, `redis_exec`,
 `rocketmq_targets`, `rocketmq_read`.
 Long operations return a `pending` result with an id after `max_block_seconds`; resume with `session_wait` /
 `archery_wait`. `session_close` is one of them: it closes nothing until a person has typed `DELETE` on a page that names the
@@ -536,7 +555,7 @@ securl archery run-sql --url https://archery.corp.example --instance x --databas
 ```
 
 - Every command, by the tool it runs: `securl session open|wait|list|close`, `securl site list`, `securl request`, `securl db
-  targets|query|exec`, `securl telegram targets|send|read`, `securl dingtalk targets|send`, `securl redis targets|query|exec`, `securl rocketmq targets|read` and `securl archery instances|groups|query|run-sql|wait|workflow-status|cancel`. `securl session close`
+  targets|query|exec`, `securl telegram targets|send|read`, `securl zulip targets|send|read`, `securl dingtalk targets|send`, `securl redis targets|query|exec`, `securl rocketmq targets|read` and `securl archery instances|groups|query|run-sql|wait|workflow-status|cancel`. `securl session close`
   asks a person to confirm and waits for them. The flags of a command are `securl <group> <command> --help`. Besides the
   tools: `securl vault init|status|passwd|migrate`, `securl unlock`, `securl daemon` (and `status`, `install`, `uninstall`),
   `securl doctor`, `securl config ...`, `securl page [dir]` (write the login page to a directory, to host it yourself),
