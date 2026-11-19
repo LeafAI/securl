@@ -117,19 +117,19 @@ func vaultStateOverSocket(t *testing.T, sock string) string {
 	return out.State
 }
 
-// Without --daemon a securl serves stdio and nothing else: no socket is made, so nothing about the default changes.
+// Without -daemon a securl serves stdio and nothing else: no socket is made, so nothing about the default changes.
 func TestWithoutTheDaemonFlagNoSocketIsMade(t *testing.T) {
 	p := startBoth(t)
 	if !p.stdioAnswers(t) {
 		t.Fatalf("stdio does not answer:\n%s", p.stderr.String())
 	}
 	if _, err := os.Stat(p.sock); err == nil {
-		t.Error("a socket was made without --daemon")
+		t.Error("a socket was made without -daemon")
 	}
 }
 
 func TestSecurlDashDashDaemonServesStdioAndTheSocketFromOneProcess(t *testing.T) {
-	for name, args := range map[string][]string{"no word": {"--daemon"}, "serve": {"serve", "--daemon"}} {
+	for name, args := range map[string][]string{"no word": {"-daemon"}, "serve": {"serve", "-daemon"}} {
 		t.Run(name, func(t *testing.T) {
 			p := startBoth(t, args...)
 			p.waitSocket(t)
@@ -148,7 +148,7 @@ func TestSecurlDashDashDaemonServesStdioAndTheSocketFromOneProcess(t *testing.T)
 
 func TestADaemonAlreadyOnTheSocketStopsTheServerBeforeItServesStdio(t *testing.T) {
 	cfg, _, _, _ := startDaemonProcess(t)
-	cmd := exec.Command(binary(t), "--daemon", "-config", cfg)
+	cmd := exec.Command(binary(t), "-daemon", "-config", cfg)
 	cmd.Env = append(os.Environ(), "HOME="+filepath.Dir(cfg), "XDG_CONFIG_HOME="+filepath.Join(filepath.Dir(cfg), "cfg"))
 	cmd.Stdin = strings.NewReader(initialize)
 	out, err := cmd.CombinedOutput()
@@ -164,7 +164,7 @@ func TestADaemonAlreadyOnTheSocketStopsTheServerBeforeItServesStdio(t *testing.T
 }
 
 func TestWhenStdioEndsTheSocketIsRemovedAndTheProcessExits(t *testing.T) {
-	p := startBoth(t, "--daemon")
+	p := startBoth(t, "-daemon")
 	p.waitSocket(t)
 	if !p.stdioAnswers(t) {
 		t.Fatal("stdio does not answer")
@@ -186,7 +186,7 @@ func TestWhenStdioEndsTheSocketIsRemovedAndTheProcessExits(t *testing.T) {
 }
 
 func TestATerminationSignalStopsBothAndRemovesTheSocket(t *testing.T) {
-	p := startBoth(t, "--daemon")
+	p := startBoth(t, "-daemon")
 	p.waitSocket(t)
 	if !p.stdioAnswers(t) {
 		t.Fatal("stdio does not answer")
@@ -211,7 +211,7 @@ func TestATerminationSignalStopsBothAndRemovesTheSocket(t *testing.T) {
 
 // What the socket gives is the same as the daemon's: another user's connection is not served (the check is the daemon package's own).
 func TestTheSocketOfTheServerIsPrivateToItsUser(t *testing.T) {
-	p := startBoth(t, "--daemon")
+	p := startBoth(t, "-daemon")
 	p.waitSocket(t)
 	st, err := os.Stat(p.sock)
 	if err != nil {
@@ -234,7 +234,7 @@ func tmpShort(t *testing.T) (string, error) {
 // A command that is in the middle of a session when stdio ends is closed by the socket's own shutdown, and the process waits for that
 // to finish before it leaves: it does not exit with a session half served, and it does not leave the socket behind.
 func TestAnOpenCommandSessionIsClosedWhenStdioEndsAndTheProcessWaitsForIt(t *testing.T) {
-	p := startBoth(t, "--daemon")
+	p := startBoth(t, "-daemon")
 	p.waitSocket(t)
 	if !p.stdioAnswers(t) {
 		t.Fatal("stdio does not answer")
@@ -260,7 +260,7 @@ func TestAnOpenCommandSessionIsClosedWhenStdioEndsAndTheProcessWaitsForIt(t *tes
 }
 
 func TestTheLogSaysThatStdioEndedAndNothingElseWasLeftRunning(t *testing.T) {
-	p := startBoth(t, "--daemon")
+	p := startBoth(t, "-daemon")
 	p.waitSocket(t)
 	p.stdioAnswers(t)
 	p.in.Close()
@@ -273,7 +273,7 @@ func TestTheLogSaysThatStdioEndedAndNothingElseWasLeftRunning(t *testing.T) {
 // The same for the server that also serves the socket: a stop straight after the socket appears is an orderly stop every time.
 func TestAStopRightAfterTheSocketAppearsStopsTheDualServerOrderlyEveryTime(t *testing.T) {
 	for i := 0; i < 30; i++ {
-		p := startBoth(t, "--daemon")
+		p := startBoth(t, "-daemon")
 		for end := time.Now().Add(15 * time.Second); time.Now().Before(end); {
 			if st, err := os.Stat(p.sock); err == nil && st.Mode()&os.ModeSocket != 0 {
 				break
@@ -295,7 +295,7 @@ func TestAStopRightAfterTheSocketAppearsStopsTheDualServerOrderlyEveryTime(t *te
 // A command finds the socket of the dual server by the same rule that made it: the same configuration file gives the same path, and
 // `securl daemon status` with it reaches the process and reads its vault.
 func TestACommandWithTheSameConfigurationFindsTheDualServersSocketByItself(t *testing.T) {
-	p := startBoth(t, "--daemon")
+	p := startBoth(t, "-daemon")
 	p.waitSocket(t)
 	if !p.stdioAnswers(t) {
 		t.Fatal("stdio does not answer")
@@ -307,7 +307,7 @@ func TestACommandWithTheSameConfigurationFindsTheDualServersSocketByItself(t *te
 }
 
 func TestACommandWithAnotherSocketSettingDoesNotFindItAndSaysWhereItLooked(t *testing.T) {
-	p := startBoth(t, "--daemon")
+	p := startBoth(t, "-daemon")
 	p.waitSocket(t)
 	other := filepath.Join(p.dir, "other.yaml")
 	if err := os.WriteFile(other, []byte("vault:\n  dir: "+filepath.Join(p.dir, "vault")+"\ndaemon:\n  socket: "+filepath.Join(p.dir, "elsewhere.sock")+"\n"), 0o600); err != nil {
@@ -316,5 +316,26 @@ func TestACommandWithAnotherSocketSettingDoesNotFindItAndSaysWhereItLooked(t *te
 	out, _, code := runBinary(t, p.cfg, "daemon", "status", "-config", other)
 	if code == 0 || !strings.Contains(out, "not running") || !strings.Contains(out, "elsewhere.sock") {
 		t.Errorf("a command that reads another configuration says it did not find a daemon, and where it looked: %q %d", out, code)
+	}
+}
+
+// The program's own flags are written with one dash (-config, -daemon), as the documents write them. Go's flag package takes two as well, so
+// a person who types --daemon is served too; both spellings and the explicit values reach the same switch.
+func TestTheDaemonFlagIsWrittenWithOneDashAndTwoWorkToo(t *testing.T) {
+	for name, arg := range map[string]string{"one dash": "-daemon", "two dashes": "--daemon", "explicit true": "-daemon=true"} {
+		t.Run(name, func(t *testing.T) {
+			p := startBoth(t, arg)
+			p.waitSocket(t)
+			if !p.stdioAnswers(t) {
+				t.Fatalf("stdio does not answer:\n%s", p.stderr.String())
+			}
+		})
+	}
+	p := startBoth(t, "-daemon=false")
+	if !p.stdioAnswers(t) {
+		t.Fatalf("stdio does not answer:\n%s", p.stderr.String())
+	}
+	if _, err := os.Stat(p.sock); err == nil {
+		t.Error("-daemon=false made a socket")
 	}
 }

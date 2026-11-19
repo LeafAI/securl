@@ -6,7 +6,7 @@
 //
 //	securl [-config file]        serve MCP over stdio (no arguments: this is what an MCP client starts)
 //	securl serve [-config file]  the same, by name
-//	securl [serve] --daemon      the same, and the daemon's socket too, from this one process (one vault, one unlock)
+//	securl [serve] -daemon      the same, and the daemon's socket too, from this one process (one vault, one unlock)
 //	securl unlock                ask the person to open the vault of the running daemon (by link: no passphrase is typed here)
 //	securl daemon [-config file] the long-running process the commands below talk to (securl daemon status: is it running)
 //	securl <group> <command> ... run one tool from the command line (securl session open --url ...; see securl help)

@@ -149,14 +149,20 @@ func TestTheDaemonFlagTheDocumentsNameIsOneTheProgramHas(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(b), "--daemon") {
-			t.Errorf("%s does not say that `securl --daemon` exists", f)
+		if !strings.Contains(string(b), "`securl -daemon`") && !strings.Contains(string(b), "securl -daemon") {
+			t.Errorf("%s does not say that `securl -daemon` exists", f)
+		}
+	}
+	for _, f := range []string{"skills/securl/SKILL.md", "docs/OPERATING.md", "README.md", "DESIGN.md", "main.go", "serve_daemon_unix.go", "serve_daemon_other.go"} {
+		b, _ := os.ReadFile(f)
+		if strings.Contains(string(b), "--daemon") {
+			t.Errorf("%s writes the flag with two dashes: the program's own flags (-config, -daemon) are written with one", f)
 		}
 	}
 	skill, _ := os.ReadFile("skills/securl/SKILL.md")
 	for _, must := range []string{"off by default", "one vault", "already listening"} {
 		if !strings.Contains(string(skill), must) {
-			t.Errorf("the skill does not say %q about --daemon", must)
+			t.Errorf("the skill does not say %q about -daemon", must)
 		}
 	}
 }

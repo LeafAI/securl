@@ -191,7 +191,7 @@ For clients that accept a JSON server configuration (use the actual binary path 
 
 `securl` / `securl serve` is a stdio MCP server: the client must keep its process and transport open for the whole
 workflow. It does not attach to the **CLI daemon**; unlocking that daemon does not unlock a separately launched MCP
-server. **`securl --daemon`** (or `securl serve --daemon`) is the one process that serves both, from one server: one vault and
+server. **`securl -daemon`** (or `securl serve -daemon`) is the one process that serves both, from one server: one vault and
 one unlock for the agent and for the commands of the command line. It is off by default (see docs/OPERATING.md). On a single persistent MCP connection, call `vault_status`, `vault_unlock` when locked, `session_list`, then
 `session_open` / `session_wait` only when needed, followed by the requested tool. If an unlock returns `pending`, resume
 with `vault_unlock` and its returned `login_id` as `unlock_id`; do not create a new server process between these calls.
