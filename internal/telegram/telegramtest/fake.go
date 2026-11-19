@@ -23,7 +23,16 @@ type Message struct {
 	FromID int64
 	Text   string
 	Bot    bool
-	At     time.Time
+	// Channel is a post in a channel: Telegram sends it as a channel_post update with no sender user, and the channel itself (its
+	// title is From) as the sender chat. A post is delivered only to a bot that is in the channel and only when the bot asked for
+	// channel_post updates.
+	Channel bool
+	// Caption makes the text a photo's caption: the message then has a caption and no text, as a post of a picture does.
+	Caption bool
+	// SenderTitle, for a channel post, is the title of the sender chat when it is not the channel's own (a post made on behalf of a
+	// linked chat). Empty: the channel itself.
+	SenderTitle string
+	At          time.Time
 	// ReplyTo is the id of the message this one answers, if any.
 	ReplyTo int64
 }
@@ -55,6 +64,7 @@ type API struct {
 	bots    map[string]*Bot
 	updates map[string][]update // per token, in order, not yet confirmed
 	next    int64               // update ids and message ids
+	allowed map[string][]string // per token, the allowed_updates of its last getUpdates
 	sent    []Sent
 	paths   []string
 	// FailNext makes the next call of a method answer this status, once. A key is a method name ("sendMessage").
@@ -79,7 +89,7 @@ type update struct {
 
 // New starts the fake. The caller closes it.
 func New(bots ...Bot) *API {
-	a := &API{bots: map[string]*Bot{}, updates: map[string][]update{}, next: 1000,
+	a := &API{bots: map[string]*Bot{}, updates: map[string][]update{}, allowed: map[string][]string{}, next: 1000,
 		FailNext: map[string]Failure{}, Calls: map[string]int{}, Webhook: map[string]bool{}}
 	for i := range bots {
 		b := bots[i]
@@ -116,6 +126,37 @@ func (a *API) say(chatID int64, from string, fromID int64, text string, replyTo 
 	return m.ID
 }
 
+// Post puts a post into a channel, as its administrators write it: no person is the sender, the channel is. Only a bot that is in the
+// channel gets it (the fake takes being in a channel to mean being an administrator, which is what the real API needs of a bot to
+// deliver one), and only if it asked for channel_post updates.
+func (a *API) Post(chatID int64, title, text string) int64 {
+	return a.post(chatID, Message{From: title, Text: text})
+}
+
+// PostAs is Post for a post whose sender chat has a title of its own, and PostPhoto one that is a picture with a caption.
+func (a *API) PostAs(chatID int64, title, senderTitle, text string) int64 {
+	return a.post(chatID, Message{From: title, SenderTitle: senderTitle, Text: text})
+}
+
+func (a *API) PostPhoto(chatID int64, title, caption string) int64 {
+	return a.post(chatID, Message{From: title, Text: caption, Caption: true})
+}
+
+func (a *API) post(chatID int64, m Message) int64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.next++
+	m.ID, m.ChatID, m.FromID, m.Channel, m.At = a.next, chatID, chatID, true, time.Now()
+	for tok, b := range a.bots {
+		if !b.Chats[chatID] {
+			continue
+		}
+		a.next++
+		a.updates[tok] = append(a.updates[tok], update{ID: a.next, Msg: m})
+	}
+	return m.ID
+}
+
 // Sent returns what the bots were asked to send, oldest first.
 func (a *API) Sent() []Sent {
 	a.mu.Lock()
@@ -128,6 +169,13 @@ func (a *API) Paths() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]string(nil), a.paths...)
+}
+
+// LastAllowed is the allowed_updates of the last getUpdates of a bot, as the fake read it (nil if there was none).
+func (a *API) LastAllowed(token string) []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.allowed[token]...)
 }
 
 // Pending is how many updates of a bot nobody has confirmed yet.
@@ -258,17 +306,46 @@ func (a *API) getUpdates(w http.ResponseWriter, token string, args map[string]an
 		a.updates[token] = keep
 	}
 	limit := clampLimit(num(args["limit"]))
+	// allowed_updates: a type the caller did not ask for is not delivered, and is dropped when the call is made, so asking for it
+	// later does not bring it back (the real API's rule). Without the argument the fake delivers every type; securl always says.
+	if allowed, said := allowedTypes(args["allowed_updates"]); said {
+		a.allowed[token] = a.allowed[token][:0:0]
+		for t := range allowed {
+			a.allowed[token] = append(a.allowed[token], t)
+		}
+		keep := a.updates[token][:0:0]
+		for _, u := range a.updates[token] {
+			if allowed[u.Msg.updateType()] {
+				keep = append(keep, u)
+			}
+		}
+		a.updates[token] = keep
+	}
 	out := []map[string]any{}
 	for _, u := range a.updates[token] {
 		if len(out) == limit {
 			break
 		}
-		m := map[string]any{"message_id": u.Msg.ID, "date": u.Msg.At.Unix(), "chat": map[string]any{"id": u.Msg.ChatID},
-			"from": map[string]any{"id": u.Msg.FromID, "is_bot": u.Msg.Bot, "first_name": u.Msg.From}, "text": u.Msg.Text}
+		m := map[string]any{"message_id": u.Msg.ID, "date": u.Msg.At.Unix(), "chat": map[string]any{"id": u.Msg.ChatID}}
+		if u.Msg.Caption {
+			m["caption"] = u.Msg.Text
+		} else {
+			m["text"] = u.Msg.Text
+		}
+		if u.Msg.Channel {
+			sender := u.Msg.From
+			if u.Msg.SenderTitle != "" {
+				sender = u.Msg.SenderTitle
+			}
+			m["chat"] = map[string]any{"id": u.Msg.ChatID, "title": u.Msg.From, "type": "channel"}
+			m["sender_chat"] = map[string]any{"id": u.Msg.ChatID, "title": sender, "type": "channel"}
+		} else {
+			m["from"] = map[string]any{"id": u.Msg.FromID, "is_bot": u.Msg.Bot, "first_name": u.Msg.From}
+		}
 		if u.Msg.ReplyTo != 0 {
 			m["reply_to_message"] = map[string]any{"message_id": u.Msg.ReplyTo}
 		}
-		out = append(out, map[string]any{"update_id": u.ID, "message": m})
+		out = append(out, map[string]any{"update_id": u.ID, u.Msg.updateType(): m})
 	}
 	a.reply(w, 200, map[string]any{"ok": true, "result": out})
 }
@@ -279,4 +356,28 @@ func (a *API) Tokens() map[string]*Bot {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.bots
+}
+
+// updateType is the name of the key under which Telegram delivers a message: a post in a channel is a channel_post, anything said in
+// a group or a private chat is a message.
+func (m Message) updateType() string {
+	if m.Channel {
+		return "channel_post"
+	}
+	return "message"
+}
+
+// allowedTypes reads allowed_updates. said is false when the caller gave none.
+func allowedTypes(v any) (set map[string]bool, said bool) {
+	list, ok := v.([]any)
+	if !ok {
+		return nil, false
+	}
+	set = map[string]bool{}
+	for _, x := range list {
+		if t, ok := x.(string); ok {
+			set[t] = true
+		}
+	}
+	return set, true
 }

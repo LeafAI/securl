@@ -234,16 +234,21 @@ type Message struct {
 	FromID    int64
 	From      string // the sender's first name (or their title): what a person called themselves, so not to be trusted
 	FromBot   bool
-	Text      string
-	At        time.Time
-	ReplyTo   int64
+	// Channel is true for a post in a channel. A channel's posts are written by its administrators and carry no sender user: From is
+	// the channel's title and FromID is 0, so a post is never taken for something a person said in a group.
+	Channel bool
+	Text    string
+	At      time.Time
+	ReplyTo int64
 }
 
 // Updates reads up to limit new updates, those at or after offset (0: from the oldest not yet confirmed). Asking for an offset
 // confirms every update before it, and Telegram then forgets them: a caller that confirms what it has not stored loses it.
 // wait is how long to hold the request open for something to arrive (0: answer at once).
 func (c *Client) Updates(ctx context.Context, offset int64, limit int, wait time.Duration) ([]Message, error) {
-	args := map[string]any{"limit": limit, "allowed_updates": []string{"message"}}
+	// message is what is said in a group or a private chat; channel_post is what is posted in a channel, which Telegram sends under
+	// that name and to no bot that does not ask for it. Nothing else is asked for: not edits, not reactions, not membership changes.
+	args := map[string]any{"limit": limit, "allowed_updates": []string{"message", "channel_post"}}
 	if offset != 0 {
 		args["offset"] = offset
 	}
@@ -254,25 +259,32 @@ func (c *Client) Updates(ctx context.Context, offset int64, limit int, wait time
 	if err != nil {
 		return nil, err
 	}
+	type post struct {
+		ID   int64 `json:"message_id"`
+		Date int64 `json:"date"`
+		Chat struct {
+			ID    int64  `json:"id"`
+			Title string `json:"title"`
+		} `json:"chat"`
+		SenderChat *struct {
+			ID    int64  `json:"id"`
+			Title string `json:"title"`
+		} `json:"sender_chat"`
+		From *struct {
+			ID        int64  `json:"id"`
+			IsBot     bool   `json:"is_bot"`
+			FirstName string `json:"first_name"`
+		} `json:"from"`
+		Text    string `json:"text"`
+		Caption string `json:"caption"`
+		Reply   *struct {
+			ID int64 `json:"message_id"`
+		} `json:"reply_to_message"`
+	}
 	var ups []struct {
-		UpdateID int64 `json:"update_id"`
-		Message  *struct {
-			ID   int64 `json:"message_id"`
-			Date int64 `json:"date"`
-			Chat struct {
-				ID int64 `json:"id"`
-			} `json:"chat"`
-			From *struct {
-				ID        int64  `json:"id"`
-				IsBot     bool   `json:"is_bot"`
-				FirstName string `json:"first_name"`
-			} `json:"from"`
-			Text    string `json:"text"`
-			Caption string `json:"caption"`
-			Reply   *struct {
-				ID int64 `json:"message_id"`
-			} `json:"reply_to_message"`
-		} `json:"message"`
+		UpdateID    int64 `json:"update_id"`
+		Message     *post `json:"message"`
+		ChannelPost *post `json:"channel_post"`
 	}
 	if err := json.Unmarshal(raw, &ups); err != nil {
 		return nil, fmt.Errorf("telegram getUpdates: the answer is not a list of updates")
@@ -280,17 +292,28 @@ func (c *Client) Updates(ctx context.Context, offset int64, limit int, wait time
 	out := make([]Message, 0, len(ups))
 	for _, u := range ups {
 		m := Message{UpdateID: u.UpdateID}
-		if u.Message != nil {
-			m.MessageID, m.ChatID, m.At = u.Message.ID, u.Message.Chat.ID, time.Unix(u.Message.Date, 0).UTC()
-			m.Text = u.Message.Text
+		p, channel := u.Message, false
+		if p == nil {
+			p, channel = u.ChannelPost, true
+		}
+		if p != nil {
+			m.MessageID, m.ChatID, m.At = p.ID, p.Chat.ID, time.Unix(p.Date, 0).UTC()
+			m.Text = p.Text
 			if m.Text == "" {
-				m.Text = u.Message.Caption
+				m.Text = p.Caption
 			}
-			if u.Message.From != nil {
-				m.FromID, m.From, m.FromBot = u.Message.From.ID, u.Message.From.FirstName, u.Message.From.IsBot
+			switch {
+			case channel:
+				// no sender user: the channel wrote it, under its own title (the sender chat's, else the chat's)
+				m.Channel, m.From = true, p.Chat.Title
+				if p.SenderChat != nil && p.SenderChat.Title != "" {
+					m.From = p.SenderChat.Title
+				}
+			case p.From != nil:
+				m.FromID, m.From, m.FromBot = p.From.ID, p.From.FirstName, p.From.IsBot
 			}
-			if u.Message.Reply != nil {
-				m.ReplyTo = u.Message.Reply.ID
+			if p.Reply != nil {
+				m.ReplyTo = p.Reply.ID
 			}
 		}
 		out = append(out, m)

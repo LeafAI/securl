@@ -282,3 +282,107 @@ func TestReturningNothingDoesNothingAndReturnRespectsTheBound(t *testing.T) {
 		t.Errorf("the bound holds: %v", texts(rest))
 	}
 }
+
+// A post in a channel is not a message to Telegram: it is a channel_post, delivered only to a bot that asks for that type. A client
+// that asks only for messages is never sent a channel's posts, and reads an empty channel without any error.
+const channelID = int64(-1007000000001)
+
+func TestAPostInAChannelIsReadLikeAMessageOfAGroup(t *testing.T) {
+	api, in := inbox(t, false)
+	api.Tokens()[tok].Chats[channelID] = true
+	api.Post(channelID, "Rick's Team", "the release is out")
+	got, err := in.Read(context.Background(), channelID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(texts(got)) != "[the release is out]" {
+		t.Fatalf("a channel post was not read: %v", texts(got))
+	}
+	if got[0].ChatID != channelID || got[0].MessageID == 0 || got[0].At.IsZero() {
+		t.Errorf("%+v", got[0])
+	}
+}
+
+// A post has no sender user: the channel wrote it. Its name is the channel's title, and the message says it is a post, so that nobody
+// takes it for a person who spoke in a group.
+func TestAChannelPostSaysItIsFromTheChannelAndNotFromAPerson(t *testing.T) {
+	api, in := inbox(t, false)
+	api.Tokens()[tok].Chats[channelID] = true
+	api.Post(channelID, "Rick's Team", "x")
+	got, _ := in.Read(context.Background(), channelID, 10)
+	if len(got) != 1 || !got[0].Channel || got[0].From != "Rick's Team" || got[0].FromID != 0 || got[0].FromBot {
+		t.Fatalf("%+v", got)
+	}
+	api.Say(chatA, "ann", 1, "hello", 0)
+	got, _ = in.Read(context.Background(), chatA, 10)
+	if len(got) != 1 || got[0].Channel || got[0].From != "ann" {
+		t.Errorf("a message in a group is not a channel post: %+v", got)
+	}
+}
+
+// Both kinds are in one queue of one bot, and reading one chat must keep what was said in the others, a channel included.
+func TestAChannelAndAGroupOfOneBotAreReadApartFromEachOther(t *testing.T) {
+	api, in := inbox(t, false)
+	api.Tokens()[tok].Chats[channelID] = true
+	api.Say(chatA, "ann", 1, "a1", 0)
+	api.Post(channelID, "Rick's Team", "c1")
+	api.Say(chatA, "ann", 1, "a2", 0)
+	api.Post(channelID, "Rick's Team", "c2")
+	got, _ := in.Read(context.Background(), chatA, 10)
+	if fmt.Sprint(texts(got)) != "[a1 a2]" {
+		t.Fatalf("group: %v", texts(got))
+	}
+	got, _ = in.Read(context.Background(), channelID, 10)
+	if fmt.Sprint(texts(got)) != "[c1 c2]" {
+		t.Fatalf("channel: %v", texts(got))
+	}
+	if again, _ := in.Read(context.Background(), channelID, 10); len(again) != 0 {
+		t.Errorf("a post was returned twice: %v", texts(again))
+	}
+}
+
+// A bot that is not in the channel is sent nothing of it, and that is not an error.
+func TestABotThatIsNotInTheChannelReadsNothingOfIt(t *testing.T) {
+	api, in := inbox(t, false)
+	api.Post(channelID, "Rick's Team", "secret")
+	got, err := in.Read(context.Background(), channelID, 10)
+	if err != nil || len(got) != 0 {
+		t.Errorf("%v %v", texts(got), err)
+	}
+}
+
+// The request names the types it wants. The one that was missing is the whole of the bug, so it is checked on the wire, and so is that
+// the types are not widened to everything: edited posts, reactions and the rest are not read.
+func TestTheRequestAsksForMessagesAndChannelPostsAndNothingElse(t *testing.T) {
+	api, in := inbox(t, false)
+	if _, err := in.Read(context.Background(), chatA, 1); err != nil {
+		t.Fatal(err)
+	}
+	got := api.LastAllowed(tok)
+	if len(got) != 2 || !((got[0] == "message" && got[1] == "channel_post") || (got[0] == "channel_post" && got[1] == "message")) {
+		t.Errorf("allowed_updates is %v", got)
+	}
+}
+
+// A post of a picture has a caption and no text; what the caption says is what was posted.
+func TestAPostThatIsAPictureIsReadByItsCaption(t *testing.T) {
+	api, in := inbox(t, false)
+	api.Tokens()[tok].Chats[channelID] = true
+	api.PostPhoto(channelID, "Rick's Team", "the new dashboard")
+	got, _ := in.Read(context.Background(), channelID, 10)
+	if len(got) != 1 || got[0].Text != "the new dashboard" || !got[0].Channel {
+		t.Errorf("%+v", got)
+	}
+}
+
+// The sender chat is what names who posted; when it is another chat than the channel (a post made on behalf of a linked chat), its
+// title is the name, not the channel's.
+func TestThePosterIsNamedBySenderChatWhenItIsNotTheChannelItself(t *testing.T) {
+	api, in := inbox(t, false)
+	api.Tokens()[tok].Chats[channelID] = true
+	api.PostAs(channelID, "Rick's Team", "Linked chat", "on behalf")
+	got, _ := in.Read(context.Background(), channelID, 10)
+	if len(got) != 1 || got[0].From != "Linked chat" {
+		t.Errorf("%+v", got)
+	}
+}

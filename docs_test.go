@@ -113,3 +113,23 @@ func TestNoDocumentTalksAboutCompatibilityWithAnOlderName(t *testing.T) {
 		}
 	}
 }
+
+// A channel is not a group to Telegram, and a bot reads a channel's posts only as an administrator. A document that did not say so would
+// leave a person with a bot that reads an empty channel and no error, which is exactly what happened.
+func TestTheDocumentsSayThatAChannelIsReadAndThatTheBotMustBeItsAdministrator(t *testing.T) {
+	for _, f := range []string{"skills/securl/SKILL.md", "MCP_TOOLS.md", "docs/OPERATING.md"} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		low := strings.ToLower(string(b))
+		for _, want := range []string{"channel", "administrator", "channel_post"} {
+			if f == "docs/OPERATING.md" && want == "channel_post" {
+				continue
+			}
+			if !strings.Contains(low, want) {
+				t.Errorf("%s does not say %q about reading a channel", f, want)
+			}
+		}
+	}
+}
