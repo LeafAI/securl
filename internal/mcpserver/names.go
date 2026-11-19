@@ -25,6 +25,9 @@ const (
 	toolRocketMQRead    = "rocketmq_read"    // read the latest messages of a topic, without consuming them
 	toolDingTalkTargets = "dingtalk_targets" // the DingTalk groups the owner has made reachable
 	toolDingTalkSend    = "dingtalk_send"    // say something in a DingTalk group
+	toolZulipTargets    = "zulip_targets"    // the Zulip servers and channels the owner has made reachable
+	toolZulipSend       = "zulip_send"       // say something in a channel, under a topic the agent chooses
+	toolZulipRead       = "zulip_read"       // read what was said in a channel
 	toolVaultStatus     = "vault_status"
 	toolVaultUnlock     = "vault_unlock"
 

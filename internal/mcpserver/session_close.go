@@ -24,6 +24,7 @@ import (
 	"github.com/LeafAI/securl/internal/session"
 	"github.com/LeafAI/securl/internal/site"
 	"github.com/LeafAI/securl/internal/telegramsite"
+	"github.com/LeafAI/securl/internal/zulipsite"
 )
 
 // Closing a saved session forgets what a person typed. A database account in particular is a password that cannot be asked
@@ -143,6 +144,12 @@ func (s *Server) scopeOf(c *core, in LogoutInput) (closeScope, *ToolError) {
 		base = b
 	} else if strings.HasPrefix(strings.ToLower(in.URL), rocketmqsite.Scheme+":") {
 		_, b, terr := s.rocketmqTarget(in.URL)
+		if terr != nil {
+			return closeScope{}, terr
+		}
+		base = b
+	} else if strings.HasPrefix(strings.ToLower(in.URL), zulipsite.Scheme+":") {
+		_, b, terr := s.zulipTarget(in.URL)
 		if terr != nil {
 			return closeScope{}, terr
 		}
@@ -390,6 +397,15 @@ func closeDetail(keys []string) string {
 	}
 	if clusters > 0 {
 		d += fmt.Sprintf(" %d of them are RocketMQ clusters (rocketmq://): the AccessKey and SecretKey a person typed are not kept anywhere else, and must be typed again.", clusters)
+	}
+	var zulips int
+	for _, n := range names {
+		if strings.HasPrefix(n, zulipsite.Scheme+"://") {
+			zulips++
+		}
+	}
+	if zulips > 0 {
+		d += fmt.Sprintf(" %d of them are Zulip servers (zulip://): the bot key a person typed is not kept anywhere else, and must be typed again (the bot's owner can show it again in Zulip).", zulips)
 	}
 	if hooks > 0 {
 		d += fmt.Sprintf(" %d of them are DingTalk groups (dingtalk://): the robot webhook a person typed is not kept anywhere else, and must be pasted again from the robot's settings in DingTalk.", hooks)

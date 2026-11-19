@@ -23,6 +23,7 @@ import (
 	"github.com/LeafAI/securl/internal/session"
 	"github.com/LeafAI/securl/internal/site"
 	"github.com/LeafAI/securl/internal/telegramsite"
+	"github.com/LeafAI/securl/internal/zulipsite"
 )
 
 func baseOf(raw string) (*url.URL, *ToolError) {
@@ -91,6 +92,11 @@ func (s *Server) ensureLogin(ctx context.Context, req *mcp.CallToolRequest, raw,
 			return nil, terr
 		}
 		d = s.rocketmqDriver()
+	} else if strings.HasPrefix(strings.ToLower(raw), zulipsite.Scheme+":") {
+		if _, base, terr = s.zulipTarget(raw); terr != nil {
+			return nil, terr
+		}
+		d = s.zulipDriver()
 	} else if strings.HasPrefix(strings.ToLower(raw), dingtalksite.Scheme+":") {
 		if _, base, terr = s.dingtalkTarget(raw); terr != nil {
 			return nil, terr

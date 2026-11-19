@@ -89,6 +89,8 @@ var sensitiveCalls = map[string]map[string]any{
 	"redis_query":             {"target": "ro", "command": []string{"GET", "k"}},
 	"redis_exec":              {"target": "rw", "command": []string{"SET", "k", "v"}, "reason": "x"},
 	"rocketmq_read":           {"target": "mq", "topic": "orders"},
+	"zulip_send":              {"server": "team", "channel": "general", "topic": "t", "text": "x"},
+	"zulip_read":              {"server": "team", "channel": "general"},
 }
 
 func TestSensitiveToolsRefuseWhileTheVaultIsNotInitialized(t *testing.T) {
@@ -143,6 +145,7 @@ func TestOnlyStaticToolsWorkWhileLocked(t *testing.T) {
 	g := gateServer(t, "locked", func(c *config.Config) {
 		c.Telegram.Bots = []config.TelegramBot{{Name: "ops", Chats: []config.TelegramChat{{Name: "alerts", ChatID: -1001111111111}}}}
 		c.DingTalk.Groups = []config.DingTalkGroup{{Name: "ops"}}
+		c.Zulip = []config.Zulip{{Name: "team", Site: "https://x.example.com", Email: "b@x.example.com", Channels: []config.ZulipChannel{{Name: "general", Channel: "engineering"}}}}
 		c.Redis = []config.Redis{{Name: "ro", Host: "h.example", Environment: "dev"}}
 		c.RocketMQ = []config.RocketMQ{{Name: "mq", NameServers: []string{"h.example"}, Environment: "dev", Topics: []string{"orders"}}}
 	})
@@ -173,6 +176,11 @@ func TestOnlyStaticToolsWorkWhileLocked(t *testing.T) {
 		t.Errorf("dingtalk_targets lists the configured groups: %v %v", isErr, out)
 	} else if strings.Contains(fmt.Sprint(out), "has_session:true") {
 		t.Errorf("a locked vault cannot say which groups have a webhook: %v", out)
+	}
+	if out, isErr := g.call(t, "zulip_targets", map[string]any{}); isErr || len(fmt.Sprint(out["servers"])) < 10 {
+		t.Errorf("zulip_targets lists the configured servers: %v %v", isErr, out)
+	} else if strings.Contains(fmt.Sprint(out), "has_session:true") {
+		t.Errorf("a locked vault cannot say which servers have a key: %v", out)
 	}
 	if out, isErr := g.call(t, "db_targets", map[string]any{}); isErr || out["targets"] == nil {
 		t.Errorf("db_targets lists the configured targets: %v %v", isErr, out)

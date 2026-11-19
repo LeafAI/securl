@@ -675,3 +675,113 @@ func TestDingTalkGroupsAreNotASettingThatConfigSetCanWrite(t *testing.T) {
 		t.Error("dingtalk.groups cannot be set as one value")
 	}
 }
+
+func TestZulipServersAreWrittenReplacedAndRemovedWithoutAKeyOrADefault(t *testing.T) {
+	p := write(t, "# my config\ntelegram:\n  bots: []\n# mine\nmcp: {max_block_seconds: 30}\n")
+	e, _ := Open(p)
+	no := false
+	z := config.Zulip{Name: "team", Site: "https://x.example.com", Email: "bot@x.example.com",
+		Channels: []config.ZulipChannel{{Name: "dev", Channel: "Dev Team"}, {Name: "news", Channel: "announce", Send: &no}}}
+	if err := e.SetZulip(z); err != nil {
+		t.Fatal(err)
+	}
+	z.Channels = append(z.Channels, config.ZulipChannel{Name: "ops", Channel: "ops", Read: &no})
+	z.SendMax = 5
+	if err := e.SetZulip(z); err != nil { // same name: replaced, not duplicated
+		t.Fatal(err)
+	}
+	if err := e.SetZulip(config.Zulip{Name: "other", Site: "https://y.example.com", Email: "b@y.example.com", ReadCount: 10, SendPeriod: 2 * time.Minute,
+		Channels: []config.ZulipChannel{{Name: "a", Channel: "a"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Save(); err != nil {
+		t.Fatal(err)
+	}
+	c := reload(t, p)
+	if len(c.Zulip) != 2 {
+		t.Fatalf("%+v", c.Zulip)
+	}
+	got, _ := c.ZulipServer("team")
+	if got.Email != "bot@x.example.com" || got.SendLimit() != 5 || len(got.Channels) != 3 {
+		t.Errorf("%+v", got)
+	}
+	if n, _ := got.Channel("news"); n.CanSend() || !n.CanRead() {
+		t.Errorf("%+v", n)
+	}
+	if o, _ := got.Channel("ops"); o.CanRead() || !o.CanSend() {
+		t.Errorf("a channel the agent may not read stays unreadable: %+v", o)
+	}
+	if o, _ := c.ZulipServer("other"); o.ReadMessages() != 10 || o.SendWindow() != 2*time.Minute {
+		t.Errorf("%+v", o)
+	}
+	raw, _ := os.ReadFile(p)
+	s := string(raw)
+	if !strings.Contains(s, "# my config") || !strings.Contains(s, "# mine") {
+		t.Errorf("comments must survive:\n%s", s)
+	}
+	zs := s[strings.Index(s, "zulip:"):]
+	for _, bad := range []string{"key", "api_key", "password", "topic", "send_limit: 0", "read: true", "send: true", "read_messages: 0"} {
+		if strings.Contains(zs, bad) {
+			t.Errorf("%q is written:\n%s", bad, zs)
+		}
+	}
+	if !strings.Contains(zs, "send_window: 2m0s") || !strings.Contains(zs, "send_limit: 5") || !strings.Contains(zs, "read_messages: 10") {
+		t.Errorf("what the owner chose is written:\n%s", zs)
+	}
+	e2, _ := Open(p)
+	have, err := e2.ZulipServers()
+	if err != nil || len(have) != 2 {
+		t.Fatalf("%v %v", have, err)
+	}
+	if !e2.RemoveZulip("team") || e2.RemoveZulip("team") {
+		t.Fatal("RemoveZulip should succeed once")
+	}
+	if !e2.RemoveZulip("other") {
+		t.Fatal("other")
+	}
+	if err := e2.Save(); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(p)
+	if strings.Contains(string(after), "zulip") {
+		t.Errorf("an empty zulip list is not left behind:\n%s", after)
+	}
+	if !strings.Contains(string(after), "# my config") || !strings.Contains(string(after), "max_block_seconds") {
+		t.Errorf("the rest of the file is untouched:\n%s", after)
+	}
+}
+
+func TestEverythingAZulipEntryWritesIsAKeyTheConfigurationReadsBack(t *testing.T) {
+	p := write(t, "")
+	e, _ := Open(p)
+	if err := e.SetZulip(config.Zulip{Name: "t", Site: "https://x.example.com", Email: "b@x.example.com", SendMax: 7, SendPeriod: 90 * time.Second, ReadCount: 12,
+		Channels: []config.ZulipChannel{{Name: "a", Channel: "开发 Team #1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Save(); err != nil {
+		t.Fatal(err)
+	}
+	z, ok := reload(t, p).ZulipServer("t")
+	if !ok || z.SendLimit() != 7 || z.SendWindow() != 90*time.Second || z.ReadMessages() != 12 || z.Channels[0].Channel != "开发 Team #1" || z.Site != "https://x.example.com" {
+		t.Errorf("%+v", z)
+	}
+}
+
+// A channel that says yes explicitly is the same as one that says nothing, so the file does not say it: a default that was written
+// would stop the program from changing it later.
+func TestAZulipChannelThatSaysYesIsWrittenWithoutSayingIt(t *testing.T) {
+	yes := true
+	p := write(t, "")
+	e, _ := Open(p)
+	if err := e.SetZulip(config.Zulip{Name: "t", Site: "https://x.example.com", Email: "b@x.example.com",
+		Channels: []config.ZulipChannel{{Name: "a", Channel: "a", Read: &yes, Send: &yes}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Save(); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(p)
+	if strings.Contains(string(raw), "read:") || strings.Contains(string(raw), "send:") {
+		t.Errorf("%s", raw)
+	}
+}

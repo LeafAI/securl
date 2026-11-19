@@ -46,6 +46,9 @@ const usage = `usage: securl config <command> [-config file]
   telegram add [flags]       guided setup of one Telegram bot and the chats an agent may use, or give the answers as flags
   telegram list              show configured bots and chats
   telegram remove <name>     forget a Telegram bot
+  zulip add [flags]          guided setup of one Zulip server and the channels an agent may use (its bot's key is typed by a person, never here), or give the answers as flags
+  zulip list                 show configured servers and channels
+  zulip remove <name>        forget a Zulip server
   dingtalk group add [flags] guided setup of one DingTalk group an agent may send to (its robot's webhook is pasted by a person, never here)
   dingtalk group list        show configured groups
   dingtalk group remove <name>  forget a group
@@ -98,6 +101,8 @@ func Run(args []string, env Env) int {
 		err = cmdRedis(env, rest)
 	case "rocketmq":
 		err = cmdRocketMQ(env, rest)
+	case "zulip":
+		err = cmdZulip(env, rest)
 	case "dingtalk":
 		err = cmdDingTalk(env, rest)
 	default:

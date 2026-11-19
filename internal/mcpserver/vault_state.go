@@ -49,6 +49,10 @@ func (s *Server) openCore() error {
 	if len(s.cfg.RocketMQ) > 0 {
 		site.Replace(s.rocketmqDriver())
 	}
+	// And a Zulip server's.
+	if len(s.cfg.Zulip) > 0 {
+		site.Replace(s.zulipDriver())
+	}
 	// And a DingTalk group's, in the same way.
 	if len(s.cfg.DingTalk.Groups) > 0 {
 		site.Replace(s.dingtalkDriver())
@@ -69,6 +73,7 @@ func (s *Server) openCore() error {
 	c.closer = newCloser(s, c, unlock, sealing)
 	c.telegram = newTelegramBots()
 	c.dingtalk = newDingTalkGroups()
+	c.zulip = newZulipServers()
 	c.tracker = archery.NewTracker(s.cfg.Archery.DDLAllowed(), s.cfg.Archery.WaitTimeout)
 	c.tracker.Poll = s.cfg.Archery.PollInterval
 	s.core = c
