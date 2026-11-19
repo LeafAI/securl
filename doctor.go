@@ -96,6 +96,7 @@ func runDoctor(args []string) int {
 	}
 	doctorTelegram(cfg, report)
 	doctorDingTalkGroups(cfg, report)
+	doctorZulip(cfg, report)
 	doctorDataTargets(cfg, report)
 	doctorGuards(cfg, vstate, report)
 	if !cfg.Archery.DDLAllowed() {
