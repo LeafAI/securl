@@ -91,18 +91,26 @@ func TestADaemonLocksItselfAfterTheIdleTimeAndTheNextCommandHasToAsk(t *testing.
 	sock, app := r.startDaemon(t)
 	r.viaDaemon(sock)
 	_ = app
+	// This test failed once on a CI runner, at its first command, which found the vault shut, 0.5 s into the test and with an idle
+	// time of 0.4 s. The cause was never reproduced. If the runner was slow between making the daemon and sending the first command,
+	// the idle time ran out before the command; the idle time is judged when somebody looks at the vault, so that would look exactly
+	// like this. What is recorded here tells that apart from anything else the next time it fails: it changes nothing the test checks.
+	madeAt := time.Now()
 
-	if code := r.run(t, "session", "list"); code != 0 {
-		t.Fatalf("exit %d: %s", code, r.errOut.String())
+	code := r.run(t, "session", "list")
+	if code != 0 {
+		t.Fatalf("the first command failed (exit %d), %v after the daemon was made and with an idle time of %v; the vault was %v when this was written; stdout: %q; stderr: %s",
+			code, time.Since(madeAt).Round(time.Millisecond), r.cfg.Vault.IdleLock, r.vault.State(), r.out.String(), r.errOut.String())
 	}
 	if r.vault.State() != vault.Unlocked {
-		t.Fatal("open straight after use")
+		t.Fatalf("the vault was %v right after the first command, %v after the daemon was made (idle time %v): it must be open straight after use",
+			r.vault.State(), time.Since(madeAt).Round(time.Millisecond), r.cfg.Vault.IdleLock)
 	}
 	time.Sleep(900 * time.Millisecond) // more than twice the idle time, with nobody using the daemon
 	if st := r.vault.State(); st != vault.Locked {
 		t.Fatalf("the daemon's vault is %v after the idle time; the documents say it locks", st)
 	}
-	code := r.run(t, "session", "list")
+	code = r.run(t, "session", "list")
 	if code == 0 {
 		t.Fatalf("a locked daemon answered a tool that needs the vault: %s", r.out.String())
 	}
