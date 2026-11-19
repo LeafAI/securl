@@ -135,23 +135,23 @@ securl --no-daemon site list        # run one command alone, even with a daemon 
 - Stop it with Ctrl-C or `SIGTERM`: it locks the vault and removes the socket. A command that is talking to it when it stops
   ends with an error and is not run again by itself, since it may already have done what it was asked.
 - Not available on Windows, nor on systems that cannot report who is on the other end of a socket: commands run alone there.
-- **One process for both, if you want it:** `securl --daemon` (or `securl serve --daemon`) serves the MCP client's stdio **and** this
+- **One process for both, if you want it:** `securl -daemon` (or `securl serve -daemon`) serves the MCP client's stdio **and** this
   socket from one server. There is then one vault and one unlock: opening it for the agent opens it for the commands of the command
   line too, and the other way round. Put it in the MCP client's configuration in place of `securl`:
-  `contexts server add securl -- /usr/local/bin/securl --daemon`. It is off by default, and without it nothing is different. It
+  `contexts server add securl -- /usr/local/bin/securl -daemon`. It is off by default, and without it nothing is different. It
   ends when its stdio ends (the client stopped it) or on `SIGTERM`, and then removes the socket and locks the vault, as the daemon
   does. Its socket is the same one (`daemon.socket`), with the same checks (`0600`, the user on the other end), and it refuses to
   start while another daemon is listening there: so do not run it together with the login agent's daemon on the same socket (give
   one of them another `daemon.socket`, or stop the login agent with `sudo securl daemon uninstall`). The configuration is read once,
   as always, so a changed setting needs a restart.
-- **Where the socket is, and how a command finds it.** The daemon, `securl --daemon` and every command of the command line work the
+- **Where the socket is, and how a command finds it.** The daemon, `securl -daemon` and every command of the command line work the
   path out with the same rule: `daemon.socket` if the configuration sets it, else `$XDG_RUNTIME_DIR/securl/d.sock` if that is set (a
   Linux session with systemd), else `/tmp/securl-<uid>/d.sock` (the default on a Mac, which has no `XDG_RUNTIME_DIR`: for uid 501,
   `/tmp/securl-501/d.sock`). So a command finds the socket by itself as long as it reads the **same configuration file** and sees the
   **same `XDG_RUNTIME_DIR`** as the process that made it. It stops finding it when they differ: a server started with
-  `securl --daemon -config /other.yaml` that sets `daemon.socket` is not found by a command that reads the default file (give the
+  `securl -daemon -config /other.yaml` that sets `daemon.socket` is not found by a command that reads the default file (give the
   command the same `-config`), and a daemon started by launchd or systemd can have an environment that your terminal does not. `securl
-  daemon status [-config file]` says which path it looked at and whether anything answers there; `securl --daemon` writes the path it
+  daemon status [-config file]` says which path it looked at and whether anything answers there; `securl -daemon` writes the path it
   listens on to standard error when it starts (`also listening on <path>`).
 
 ### macOS installer package and the login agent

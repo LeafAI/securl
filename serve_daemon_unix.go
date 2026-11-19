@@ -25,14 +25,14 @@ type socketServer struct {
 	once sync.Once
 }
 
-// openSocket makes the socket when --daemon was given, and returns a value that serves nothing when it was not. It fails when a daemon
+// openSocket makes the socket when -daemon was given, and returns a value that serves nothing when it was not. It fails when a daemon
 // is already listening on the socket, or when this system cannot tell who is on the other end of one.
 func openSocket(cfg *config.Config, want bool) (*socketServer, error) {
 	if !want {
 		return &socketServer{}, nil
 	}
 	if !daemon.Supported {
-		return nil, errors.New("securl --daemon: this system cannot tell who is on the other end of a socket, which a daemon needs; run without --daemon")
+		return nil, errors.New("securl -daemon: this system cannot tell who is on the other end of a socket, which a daemon needs; run without -daemon")
 	}
 	path := climode.SocketPath(climode.Env{Config: cfg})
 	l, err := daemon.Listen(path)

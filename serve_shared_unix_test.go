@@ -28,7 +28,7 @@ func toolState(t *testing.T, cs *mcp.ClientSession) string {
 	return out.State
 }
 
-// The reason for --daemon: the stdio side and the socket side are one server, so what is opened on one is open on the other. The
+// The reason for -daemon: the stdio side and the socket side are one server, so what is opened on one is open on the other. The
 // process starts the same way main does, with one mcpserver.New whose *mcp.Server both transports connect to.
 func TestOneUnlockOpensTheStdioSideAndTheSocketSideBecauseTheyAreOneServer(t *testing.T) {
 	dir, err := tmpShort(t)
@@ -134,7 +134,7 @@ func TestAProcessThatServedTheSocketLocksTheVaultWhenItFinishes(t *testing.T) {
 	}
 }
 
-// Without --daemon nothing about stdio changes: finishing does not touch the vault (the process just ends, as it always has).
+// Without -daemon nothing about stdio changes: finishing does not touch the vault (the process just ends, as it always has).
 func TestAProcessWithoutTheSocketDoesNotLockTheVaultWhenItFinishes(t *testing.T) {
 	srv, app, sock, _ := openServer(t, false)
 	_ = srv

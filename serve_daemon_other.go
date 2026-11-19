@@ -17,7 +17,7 @@ type socketServer struct{}
 
 func openSocket(_ *config.Config, want bool) (*socketServer, error) {
 	if want {
-		return nil, errors.New("securl --daemon: not available on this system (it needs a Unix socket and the system's report of who is on the other end); run without --daemon")
+		return nil, errors.New("securl -daemon: not available on this system (it needs a Unix socket and the system's report of who is on the other end); run without -daemon")
 	}
 	return &socketServer{}, nil
 }
