@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -384,5 +386,66 @@ func TestThePosterIsNamedBySenderChatWhenItIsNotTheChannelItself(t *testing.T) {
 	got, _ := in.Read(context.Background(), channelID, 10)
 	if len(got) != 1 || got[0].From != "Linked chat" {
 		t.Errorf("%+v", got)
+	}
+}
+
+// A channel that signs its posts says who wrote each: author_signature, and the user as from. That is who posted, not the channel's
+// title; and the user's id is kept, so a post by a person is not taken for one by nobody.
+func TestASignedPostIsNamedByItsAuthorAndNotByTheChannel(t *testing.T) {
+	api, in := inbox(t, false)
+	api.Tokens()[tok].Chats[channelID] = true
+	api.PostSigned(channelID, "Team Channel", "Gemini", "Gemini First", 111, "hi")
+	got, _ := in.Read(context.Background(), channelID, 10)
+	if len(got) != 1 || !got[0].Channel || got[0].From != "Gemini" || got[0].FromID != 111 || got[0].FromBot || got[0].Text != "hi" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// With a user and no signature the user's name is the author's; with neither, the channel (the two tests above).
+func TestAPostWithAUserAndNoSignatureIsNamedByTheUser(t *testing.T) {
+	api, in := inbox(t, false)
+	api.Tokens()[tok].Chats[channelID] = true
+	api.PostSigned(channelID, "Team Channel", "", "Gemini First", 111, "hi")
+	got, _ := in.Read(context.Background(), channelID, 10)
+	if len(got) != 1 || got[0].From != "Gemini First" || got[0].FromID != 111 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// What a real channel that signs its posts sends, as it came over the wire (names and ids changed): the post is read, is a channel's,
+// and is named by its signature. The fake above is the author's idea of the API; this is the API's own shape.
+func TestAPostAsARealChannelSendsItIsRead(t *testing.T) {
+	const real = `{"ok":true,"result":[{"update_id":900,"channel_post":{"message_id":13,"from":{"id":111,"is_bot":false,"first_name":"Gemini First","username":"someone","language_code":"en"},"author_signature":"Gemini","chat":{"id":-1007000000001,"title":"A Team Channel","type":"channel"},"date":1700000000,"text":"hi"}}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(real)) }))
+	defer srv.Close()
+	ms, err := New("123:abc", Options{BaseURL: srv.URL, HTTP: srv.Client()}).Updates(context.Background(), 0, 10, 0)
+	if err != nil || len(ms) != 1 {
+		t.Fatalf("%v %v", ms, err)
+	}
+	m := ms[0]
+	if !m.Channel || m.From != "Gemini" || m.FromID != 111 || m.FromBot || m.Text != "hi" || m.ChatID != -1007000000001 || m.MessageID != 13 || m.UpdateID != 900 {
+		t.Errorf("%+v", m)
+	}
+}
+
+// sender_chat is optional. A post that names nobody at all is still the channel's, and the only name it has is the chat's own title.
+func TestAPostThatNamesNobodyIsNamedByTheTitleOfTheChannel(t *testing.T) {
+	api, in := inbox(t, false)
+	api.Tokens()[tok].Chats[channelID] = true
+	api.PostBare(channelID, "Team Channel", "hi")
+	got, _ := in.Read(context.Background(), channelID, 10)
+	if len(got) != 1 || !got[0].Channel || got[0].From != "Team Channel" || got[0].FromID != 0 || got[0].FromBot {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// A post can be written by a bot, and the message says so, as it does for a group.
+func TestAPostWrittenByABotSaysSo(t *testing.T) {
+	api, in := inbox(t, false)
+	api.Tokens()[tok].Chats[channelID] = true
+	api.PostSignedByBot(channelID, "Team Channel", "Some Bot", 222, "automated")
+	got, _ := in.Read(context.Background(), channelID, 10)
+	if len(got) != 1 || !got[0].FromBot || got[0].FromID != 222 || got[0].From != "Some Bot" {
+		t.Fatalf("%+v", got)
 	}
 }
