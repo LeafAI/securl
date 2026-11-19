@@ -29,6 +29,14 @@ type Message struct {
 	Channel bool
 	// Caption makes the text a photo's caption: the message then has a caption and no text, as a post of a picture does.
 	Caption bool
+	// Signature and Author make a post the way a channel that signs its posts sends it: an author_signature, and the user who wrote it as
+	// from (a channel's from is optional, and is present when the author is known).
+	Signature string
+	Author    string
+	AuthorID  int64
+	// AuthorBot makes the author of a signed post a bot; NoSenderChat leaves out sender_chat, which Telegram documents as optional.
+	AuthorBot    bool
+	NoSenderChat bool
 	// SenderTitle, for a channel post, is the title of the sender chat when it is not the channel's own (a post made on behalf of a
 	// linked chat). Empty: the channel itself.
 	SenderTitle string
@@ -136,6 +144,21 @@ func (a *API) Post(chatID int64, title, text string) int64 {
 // PostAs is Post for a post whose sender chat has a title of its own, and PostPhoto one that is a picture with a caption.
 func (a *API) PostAs(chatID int64, title, senderTitle, text string) int64 {
 	return a.post(chatID, Message{From: title, SenderTitle: senderTitle, Text: text})
+}
+
+// PostSigned is a post of a channel that signs its posts: author_signature is the signature, and from is the user who wrote it.
+func (a *API) PostSigned(chatID int64, title, signature, author string, authorID int64, text string) int64 {
+	return a.post(chatID, Message{From: title, Text: text, Signature: signature, Author: author, AuthorID: authorID})
+}
+
+// PostBare is a post that names nobody: no sender chat, no user, no signature. Only the chat's own title says where it came from.
+func (a *API) PostBare(chatID int64, title, text string) int64 {
+	return a.post(chatID, Message{From: title, Text: text, NoSenderChat: true})
+}
+
+// PostSignedByBot is PostSigned whose author is a bot.
+func (a *API) PostSignedByBot(chatID int64, title, author string, authorID int64, text string) int64 {
+	return a.post(chatID, Message{From: title, Text: text, Author: author, AuthorID: authorID, AuthorBot: true})
 }
 
 func (a *API) PostPhoto(chatID int64, title, caption string) int64 {
@@ -338,7 +361,15 @@ func (a *API) getUpdates(w http.ResponseWriter, token string, args map[string]an
 				sender = u.Msg.SenderTitle
 			}
 			m["chat"] = map[string]any{"id": u.Msg.ChatID, "title": u.Msg.From, "type": "channel"}
-			m["sender_chat"] = map[string]any{"id": u.Msg.ChatID, "title": sender, "type": "channel"}
+			if u.Msg.Signature == "" && u.Msg.Author == "" && !u.Msg.NoSenderChat {
+				m["sender_chat"] = map[string]any{"id": u.Msg.ChatID, "title": sender, "type": "channel"}
+			}
+			if u.Msg.Signature != "" {
+				m["author_signature"] = u.Msg.Signature
+			}
+			if u.Msg.Author != "" {
+				m["from"] = map[string]any{"id": u.Msg.AuthorID, "is_bot": u.Msg.AuthorBot, "first_name": u.Msg.Author}
+			}
 		} else {
 			m["from"] = map[string]any{"id": u.Msg.FromID, "is_bot": u.Msg.Bot, "first_name": u.Msg.From}
 		}

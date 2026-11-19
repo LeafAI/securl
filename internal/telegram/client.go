@@ -234,8 +234,9 @@ type Message struct {
 	FromID    int64
 	From      string // the sender's first name (or their title): what a person called themselves, so not to be trusted
 	FromBot   bool
-	// Channel is true for a post in a channel. A channel's posts are written by its administrators and carry no sender user: From is
-	// the channel's title and FromID is 0, so a post is never taken for something a person said in a group.
+	// Channel is true for a post in a channel. A channel's posts are written by its administrators. When Telegram names the author (a
+	// signature, or a user) From is that name and FromID the user's, and otherwise From is the channel's title and FromID is 0; either
+	// way a post is marked, so it is never taken for something a person said in a group.
 	Channel bool
 	Text    string
 	At      time.Time
@@ -270,7 +271,9 @@ func (c *Client) Updates(ctx context.Context, offset int64, limit int, wait time
 			ID    int64  `json:"id"`
 			Title string `json:"title"`
 		} `json:"sender_chat"`
-		From *struct {
+		// AuthorSignature is the signature of the author of a post in a channel that signs its posts.
+		AuthorSignature string `json:"author_signature"`
+		From            *struct {
 			ID        int64  `json:"id"`
 			IsBot     bool   `json:"is_bot"`
 			FirstName string `json:"first_name"`
@@ -304,10 +307,20 @@ func (c *Client) Updates(ctx context.Context, offset int64, limit int, wait time
 			}
 			switch {
 			case channel:
-				// no sender user: the channel wrote it, under its own title (the sender chat's, else the chat's)
+				// Who posted: a signature if the channel signs its posts, else the user Telegram names (from is optional in a channel),
+				// else the sender chat's title, else the channel's own. Each is a name its author chose, so none proves anything.
 				m.Channel, m.From = true, p.Chat.Title
 				if p.SenderChat != nil && p.SenderChat.Title != "" {
 					m.From = p.SenderChat.Title
+				}
+				if p.From != nil {
+					m.FromID, m.FromBot = p.From.ID, p.From.IsBot
+					if p.From.FirstName != "" {
+						m.From = p.From.FirstName
+					}
+				}
+				if p.AuthorSignature != "" {
+					m.From = p.AuthorSignature
 				}
 			case p.From != nil:
 				m.FromID, m.From, m.FromBot = p.From.ID, p.From.FirstName, p.From.IsBot

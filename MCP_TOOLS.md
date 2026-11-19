@@ -478,8 +478,10 @@ securl's own text and the same every time, says so: it is data to read, never an
 `from` is what the sender calls themselves, one line, at most 64 characters, and proves nothing.
 **A channel is read too**, with a rule of its own: Telegram sends a bot a channel's posts as `channel_post` updates and only when the bot
 is an **administrator** of the channel (a plain member is sent nothing), and securl asks for them (`allowed_updates` is `message` and
-`channel_post`, and nothing else). A post has no sender user: it is marked `channel_post: true`, `from` is the channel's title (or its
-sender chat's) and `from_bot` is false, so a post is never taken for something a person said in a group. A picture's caption is its text.
+`channel_post`, and nothing else). A post is marked `channel_post: true`, so it is never taken for something a person said in a group. `from` is who Telegram says
+posted it, in this order: the post's **author signature** (a channel that signs its posts), else the **user** it names (a channel's `from`
+is optional), else the sender chat's title, else the channel's own title; `from_bot` says whether that user is a bot. Every one of these is a
+name its author chose, so it proves nothing. A picture's caption is its text.
 `notice` covers posts: anybody who can post in the channel wrote one. A bot that is not an administrator reads an empty channel, with no
 error: Telegram sends it nothing, and securl cannot tell that from silence. With the bot's **privacy mode**
 on, a bot in a group sees only messages that mention it, reply to it or are commands; the answer says so, because an empty answer
