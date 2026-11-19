@@ -706,3 +706,59 @@ func (e *Editor) Save() error {
 	}
 	return nil
 }
+
+// zulipChannelEntry and zulipEntry are how a Zulip server is written: only what the owner chose, so that the limits stay the program's
+// to change, and no key (a person types that on the login page and it lives in the vault) and no topic (the agent chooses it).
+type zulipChannelEntry struct {
+	Name    string `yaml:"name"`
+	Channel string `yaml:"channel"`
+	Read    *bool  `yaml:"read,omitempty"`
+	Send    *bool  `yaml:"send,omitempty"`
+}
+
+type zulipEntry struct {
+	Name       string              `yaml:"name"`
+	Site       string              `yaml:"site"`
+	Email      string              `yaml:"email"`
+	Channels   []zulipChannelEntry `yaml:"channels"`
+	SendLimit  int                 `yaml:"send_limit,omitempty"`
+	SendWindow string              `yaml:"send_window,omitempty"`
+	ReadCount  int                 `yaml:"read_messages,omitempty"`
+}
+
+func zulipEntryOf(z config.Zulip) zulipEntry {
+	e := zulipEntry{Name: z.Name, Site: z.Site, Email: z.Email, SendLimit: z.SendMax, ReadCount: z.ReadCount, Channels: []zulipChannelEntry{}}
+	if z.SendPeriod > 0 {
+		e.SendWindow = z.SendPeriod.String()
+	}
+	for _, c := range z.Channels {
+		ce := zulipChannelEntry{Name: c.Name, Channel: c.Channel}
+		if c.Read != nil && !*c.Read {
+			ce.Read = c.Read
+		}
+		if c.Send != nil && !*c.Send {
+			ce.Send = c.Send
+		}
+		e.Channels = append(e.Channels, ce)
+	}
+	return e
+}
+
+// ZulipServers returns the Zulip servers defined in the file, as written.
+func (e *Editor) ZulipServers() ([]config.Zulip, error) {
+	n := mapGet(e.root, "zulip")
+	if n == nil {
+		return nil, nil
+	}
+	var out []config.Zulip
+	if err := n.Decode(&out); err != nil {
+		return nil, fmt.Errorf("zulip: %w", err)
+	}
+	return out, nil
+}
+
+// SetZulip adds or replaces (by name) a Zulip server and its channels. It never writes a key: a person types that on the login page.
+func (e *Editor) SetZulip(z config.Zulip) error { return e.setEntry("zulip", z.Name, zulipEntryOf(z)) }
+
+// RemoveZulip deletes a Zulip server by name, and the zulip list too when nothing is left in it.
+func (e *Editor) RemoveZulip(name string) bool { return e.removeEntry("zulip", name) }

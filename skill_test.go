@@ -66,13 +66,14 @@ func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 	known := map[string]bool{
 		"config": true, "vault": true, "doctor": true, "page": true, "version": true,
 		// the tools, as commands
-		"session": true, "site": true, "db": true, "archery": true, "telegram": true, "dingtalk": true, "redis": true, "rocketmq": true, "request": true, "serve": true, "daemon": true, "unlock": true,
+		"session": true, "site": true, "db": true, "archery": true, "telegram": true, "zulip": true, "dingtalk": true, "redis": true, "rocketmq": true, "request": true, "serve": true, "daemon": true, "unlock": true,
 	}
 	sub := map[string]map[string]bool{
-		"config":   {"init": true, "site": true, "show": true, "get": true, "set": true, "unset": true, "totp": true, "path": true, "db": true, "telegram": true, "dingtalk": true, "redis": true, "rocketmq": true},
+		"config":   {"init": true, "site": true, "show": true, "get": true, "set": true, "unset": true, "totp": true, "path": true, "db": true, "telegram": true, "zulip": true, "dingtalk": true, "redis": true, "rocketmq": true},
 		"vault":    {"init": true, "status": true, "passwd": true, "migrate": true},
 		"session":  {"open": true, "wait": true, "list": true, "close": true},
 		"telegram": {"targets": true, "send": true, "read": true},
+		"zulip":    {"targets": true, "send": true, "read": true},
 		"redis":    {"targets": true, "query": true, "exec": true},
 		"rocketmq": {"targets": true, "read": true},
 		"site":     {"list": true},
@@ -84,6 +85,7 @@ func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 	totpSub := map[string]bool{"init": true, "code": true, "status": true, "on": true, "off": true}
 	dbSub := map[string]bool{"add": true, "list": true, "remove": true}
 	telegramSub := map[string]bool{"add": true, "list": true, "remove": true}
+	zulipSub := map[string]bool{"add": true, "list": true, "remove": true}
 	dingtalkSub := map[string]bool{"group": true}
 	mqSub := map[string]bool{"add": true, "list": true, "remove": true}
 	dingtalkGroupSub := map[string]bool{"add": true, "list": true, "remove": true}
@@ -108,6 +110,9 @@ func TestEverySecurlCommandInTheSkillExists(t *testing.T) {
 		}
 		if w[0] == "config" && len(w) > 2 && w[1] == "telegram" && !telegramSub[w[2]] {
 			t.Errorf("`securl %s`: no such telegram command", m[1])
+		}
+		if w[0] == "config" && len(w) > 2 && w[1] == "zulip" && !zulipSub[w[2]] {
+			t.Errorf("`securl %s`: no such zulip command", m[1])
 		}
 		if w[0] == "config" && len(w) > 2 && (w[1] == "redis" || w[1] == "rocketmq") && !mqSub[w[2]] {
 			t.Errorf("`securl %s`: no such %s command", m[1], w[1])
@@ -409,6 +414,7 @@ func TestEveryFieldTheSkillNamesIsOneTheToolsTake(t *testing.T) {
 		"unknown_target": true, "database_not_allowed": true, "target_read_only": true, "not_read_only": true, "too_many_rows": true,
 		"statement_timeout": true, "ddl_disabled": true, "sql_error": true,
 		// error codes of the Telegram tools: held to the source by TestTheErrorCodesTheSkillNamesAreOnesTheServerSends
+		"channel_not_writable": true, "channel_not_readable": true, "channel_not_reachable": true, "mention_not_allowed": true,
 		"chat_not_writable": true, "chat_not_readable": true, "chat_not_reachable": true, "webhook_set": true, "reader_conflict": true, "text_too_long": true,
 		// error codes of the DingTalk group tools: held to the source by the same test
 		"refused_by_robot": true, "content_refused": true,

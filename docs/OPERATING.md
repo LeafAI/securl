@@ -339,6 +339,31 @@ account. A server that cannot be reached is `site_unreachable`; a refused accoun
 session. A host on this machine needs `security.allow_local_addresses: true`. A server certificate that cannot be verified
 needs the right CA on this machine, or (knowing what it gives up) `tls: skip-verify`.
 
+### Zulip: letting an agent talk in channels
+
+An agent can send to, and read from, channels you name, through a bot. It never gets the bot's key, never chooses the server or the
+channel, and **always chooses the topic** (a topic is a conversation, so which one is meant is its to say).
+
+1. **Make a bot of type "Generic bot".** In Zulip: *Personal settings → Bots → Add a new bot*, bot type **Generic bot**. An incoming or an
+   outgoing webhook bot cannot read channels. Keep the bot's **email** and **API key** (only the bot's owner can see the key). Use a bot
+   made for this: whoever holds the key controls the bot.
+2. **Subscribe it to each channel** the agent should use (*Channel settings → Subscribers*, or the bot's own settings). The bot sees
+   only channels it is subscribed to, and only what is said after it was: an empty first read of an old channel does not mean it was
+   silent, and `channel_not_reachable` means it is not subscribed (or the name is wrong).
+3. **Tell securl.** `securl config zulip add` (guided) or
+   `securl config zulip add --name team --site https://yourorg.zulipchat.com --email robot-bot@yourorg.zulipchat.com --channel dev="Dev Team"`;
+   it never asks for the key. Write `news=announce:read` to let the agent only read that channel, `:send` to let it only send; the part
+   after the `=` is the channel's name as Zulip shows it (it may have spaces). `securl config zulip list|remove` manage them. The site must
+   start with `https://` and must not be an address on your own machine or network.
+4. **Type the key once.** The agent calls `session_open` with `zulip://team`; you get the usual link and type the key on the page.
+   securl asks the server who the bot is, and keeps the key in the vault. `session_close` with the same URL forgets it, after you
+   confirm; if the key is regenerated in Zulip the next call says `session_expired` and asks again.
+
+Things to know: the channel sees what the agent posts, behind a paragraph that says an AI agent sent it, and sees the topic it chose,
+so nothing private belongs in a topic; nobody can be mentioned (`@**name**` and `@**all**` are refused); reads are marked untrusted
+because anyone in the channel can write to the agent; `send_limit` (20 a minute by default) is per server; and no message text or topic
+is in the audit log (`grep zulip audit.jsonl` shows the server, the channel, sizes and hashes).
+
 ### Telegram: letting an agent talk in a group (or read a channel)
 
 An agent can send to, and read from, chats you name, through a bot. It never gets the bot's token and never chooses a chat.

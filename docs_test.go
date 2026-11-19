@@ -18,7 +18,7 @@ func realTools(t *testing.T) map[string]bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	have := map[string]bool{"dingtalk_targets": true, "dingtalk_send": true, "telegram_targets": true, "telegram_send": true, "telegram_read": true, "redis_targets": true, "redis_query": true, "redis_exec": true, "rocketmq_targets": true, "rocketmq_read": true, "archery_instances": true, "archery_groups": true, "archery_query": true, "archery_run_sql": true,
+	have := map[string]bool{"dingtalk_targets": true, "dingtalk_send": true, "telegram_targets": true, "telegram_send": true, "telegram_read": true, "zulip_targets": true, "zulip_send": true, "zulip_read": true, "redis_targets": true, "redis_query": true, "redis_exec": true, "rocketmq_targets": true, "rocketmq_read": true, "archery_instances": true, "archery_groups": true, "archery_query": true, "archery_run_sql": true,
 		"archery_wait": true, "archery_workflow_status": true, "archery_cancel": true}
 	for _, m := range regexp.MustCompile(`= "([a-z_]+)"`).FindAllStringSubmatch(string(b), -1) {
 		have[m[1]] = true
@@ -26,7 +26,7 @@ func realTools(t *testing.T) map[string]bool {
 	return have
 }
 
-var toolish = regexp.MustCompile("`((?:session|site|vault|archery|db|telegram|dingtalk|redis|rocketmq)_[a-z_]+)`")
+var toolish = regexp.MustCompile("`((?:session|site|vault|archery|db|telegram|dingtalk|redis|rocketmq|zulip)_[a-z_]+)`")
 
 func TestEveryToolTheDocumentsNameExists(t *testing.T) {
 	have := realTools(t)

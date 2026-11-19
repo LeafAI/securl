@@ -43,6 +43,8 @@ type Event struct {
 	Chat      string   `json:"chat,omitempty"`       // telegram_*: the chat's name in the configuration (never its id)
 	TextBytes int      `json:"text_bytes,omitempty"` // telegram_send: size of the text, never the text
 	TextHash  string   `json:"text_sha256,omitempty"`
+	Server    string   `json:"server,omitempty"`    // zulip_*: the server's name in the configuration (never its site or key)
+	Channel   string   `json:"channel,omitempty"`   // zulip_*: the channel's name in the configuration (never Zulip's name for it)
 	Group     string   `json:"group,omitempty"`     // dingtalk_*: the group's name in the configuration (never its webhook)
 	Command   string   `json:"command,omitempty"`   // redis_*: the name of the command (GET, DEL ...), never a key or a value
 	KeyCount  int      `json:"key_count,omitempty"` // redis_*: how many arguments the command had after its name

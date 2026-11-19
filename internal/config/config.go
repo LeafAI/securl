@@ -51,7 +51,10 @@ type Config struct {
 	RocketMQ []RocketMQ `yaml:"rocketmq"`
 	// Telegram lists the bots, and the chats of each, that an agent may send to and read from.
 	Telegram Telegram `yaml:"telegram"`
-	Daemon   Daemon   `yaml:"daemon"`
+	// Zulip lists the Zulip servers, and the channels of each, that an agent may send to and read from, as one bot of each. A bot's
+	// API key is typed on a page and kept in the vault.
+	Zulip  []Zulip `yaml:"zulip"`
+	Daemon Daemon  `yaml:"daemon"`
 }
 
 // Daemon configures `securl daemon`, the long-running process the command-line commands talk to.
@@ -192,6 +195,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := c.Telegram.validate(); err != nil {
+		return err
+	}
+	if err := validateZulip(c.Zulip); err != nil {
 		return err
 	}
 	if err := validateRedis(c.Redis); err != nil {
