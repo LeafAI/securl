@@ -51,6 +51,11 @@ func runDaemon(args []string) int {
 		fmt.Fprintf(logOut, "securl daemon: config: %v\n", err)
 		return 3
 	}
+	// The handler for a stop is in place before the socket exists. The socket's appearing is what tells a supervisor (and a test) that the
+	// daemon is up, and a stop that comes straight after must be an orderly one: with the handler installed later, a SIGTERM in that gap
+	// killed the process by default and left the socket file behind.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	sock := climode.SocketPath(climode.Env{Config: cfg})
 	l, err := daemon.Listen(sock)
 	if err != nil {
@@ -64,8 +69,6 @@ func runDaemon(args []string) int {
 		fmt.Fprintf(logOut, "securl daemon: setup: %v\n", err)
 		return 3
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	logf("listening on %s (the vault is %s)", sock, app.VaultState())
 	daemon.Serve(ctx, l, srv, daemon.Options{Log: logf})
 	app.Lock() // the passphrase is not kept past the daemon

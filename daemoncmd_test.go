@@ -41,7 +41,8 @@ func startDaemonProcess(t *testing.T) (cfg, sock string, cmd *exec.Cmd, stderr *
 	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		if st, err := os.Stat(sock); err == nil && st.Mode()&os.ModeSocket != 0 {
+		// up means the socket is there and the daemon has said so: the socket appears a moment before the line is written
+		if st, err := os.Stat(sock); err == nil && st.Mode()&os.ModeSocket != 0 && strings.Contains(stderr.String(), "listening") {
 			return cfg, sock, cmd, stderr
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -301,5 +302,50 @@ func TestDaemonRefusesALogItCannotOpenAndSaysWhich(t *testing.T) {
 	out, err = exec.Command(binary(t), "daemon", "-config", cfg, "-log", "relative.log").CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "absolute") {
 		t.Errorf("a relative log is refused, saying why: %v\n%s", err, out)
+	}
+}
+
+// The socket appearing is what a supervisor and a test take for "up", so a stop that comes straight after it must be an orderly one.
+// The handler for the stop used to be installed after the whole server was built, and a SIGTERM in that gap killed the process by
+// default and left the socket file behind. Each run is a chance to land in the gap, so it is tried many times.
+func TestAStopRightAfterTheSocketAppearsIsAnOrderlyStopEveryTime(t *testing.T) {
+	for i := 0; i < 30; i++ {
+		dir, err := os.MkdirTemp("/tmp", "sdg")
+		if err != nil {
+			t.Fatal(err)
+		}
+		sock := filepath.Join(dir, "d.sock")
+		cfg := filepath.Join(dir, "config.yaml")
+		os.WriteFile(cfg, []byte("vault:\n  dir: "+filepath.Join(dir, "vault")+"\ndaemon:\n  socket: "+sock+"\n"), 0o600)
+		makeVault(filepath.Join(dir, "vault"), "a passphrase long enough to use")
+		cmd := exec.Command(binary(t), "daemon", "-config", cfg)
+		cmd.Env = append(os.Environ(), "HOME="+dir, "XDG_CONFIG_HOME="+filepath.Join(dir, "cfg"))
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		up := false
+		for end := time.Now().Add(15 * time.Second); time.Now().Before(end); {
+			if st, err := os.Stat(sock); err == nil && st.Mode()&os.ModeSocket != 0 {
+				up = true
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		if !up {
+			cmd.Process.Kill()
+			cmd.Wait()
+			os.RemoveAll(dir)
+			t.Fatalf("run %d: the daemon did not start", i)
+		}
+		cmd.Process.Signal(syscall.SIGTERM) // at once: no wait for the log line
+		err = cmd.Wait()
+		_, statErr := os.Stat(sock)
+		os.RemoveAll(dir)
+		if err != nil {
+			t.Fatalf("run %d: a stop right after the socket appeared was not orderly: %v", i, err)
+		}
+		if statErr == nil {
+			t.Fatalf("run %d: the socket file was left behind", i)
+		}
 	}
 }
