@@ -171,9 +171,16 @@ For a Linux package, an absolute path avoids an older Go/archive copy earlier on
 }
 ```
 
-**MCP is not the CLI daemon.** `securl` / `securl serve` starts its own stdio MCP server and does not attach to the
-CLI daemon. Keep that process/connection alive for the whole vault-unlock, site-login and tool-call workflow.
-Unlocking one does not unlock the other.
+**MCP is not the CLI daemon, unless you ask for both.** `securl` / `securl serve` starts its own stdio MCP server and does not
+attach to the CLI daemon. Keep that process/connection alive for the whole vault-unlock, site-login and tool-call workflow.
+Unlocking one does not unlock the other. **`securl --daemon`** (or `securl serve --daemon`) is the one process that serves both:
+the MCP client's stdio and the daemon's socket, from one server, so there is one vault and one unlock, and the commands of the
+command line (`securl redis query ...`) use the same open vault as the agent. It is off by default. It stops when stdio ends or on
+SIGTERM, removes the socket and locks the vault; it refuses to start if a daemon is already listening on the socket (stop that one,
+or do not use `--daemon`). Do not run it beside `securl daemon` or the login agent on the same socket. The commands find its socket
+by themselves (`daemon.socket`, else `$XDG_RUNTIME_DIR/securl/d.sock`, else `/tmp/securl-<uid>/d.sock`, the default on a Mac) provided
+they read the same `-config` and see the same `XDG_RUNTIME_DIR`; if a command says there is no daemon, run `securl daemon status` with the
+same `-config` and compare the path it prints with the one `securl --daemon` logged.
 
 For contexts, check `contexts server list` first, then add only if absent:
 

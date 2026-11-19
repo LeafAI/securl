@@ -6,6 +6,7 @@
 //
 //	securl [-config file]        serve MCP over stdio (no arguments: this is what an MCP client starts)
 //	securl serve [-config file]  the same, by name
+//	securl [serve] --daemon      the same, and the daemon's socket too, from this one process (one vault, one unlock)
 //	securl unlock                ask the person to open the vault of the running daemon (by link: no passphrase is typed here)
 //	securl daemon [-config file] the long-running process the commands below talk to (securl daemon status: is it running)
 //	securl <group> <command> ... run one tool from the command line (securl session open --url ...; see securl help)
@@ -97,6 +98,7 @@ func main() {
 	}
 
 	cfgPath := flag.String("config", config.DefaultPath(), "config file")
+	withDaemon := flag.Bool("daemon", false, "also serve the daemon's socket from this process, so that the commands of the command line and this MCP client share one vault and one unlock")
 	flag.Parse()
 	log.SetOutput(os.Stderr) // stdout is the MCP transport
 
@@ -104,15 +106,37 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
-	srv, app, err := mcpserver.New(cfg, mcpserver.Options{})
-	if err != nil {
-		log.Fatalf("setup: %v", err)
-	}
+	// A stop is handled from before the socket exists, for the reason the daemon does it: the socket appearing says "up", and a stop
+	// that comes straight after must not kill the process and leave the file behind.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// The socket is made before anything is served: a daemon that is already there is a reason not to start, said at once, and not
+	// a server that answers on stdio while the commands of the command line go to somebody else.
+	sock, err := openSocket(cfg, *withDaemon)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	srv, app, err := mcpserver.New(cfg, mcpserver.Options{})
+	if err != nil {
+		sock.close()
+		log.Fatalf("setup: %v", err)
+	}
+	sock.serve(ctx, srv, app)
 	err = srv.Run(ctx, &mcp.StdioTransport{})
-	app.Close() // tear down tunnels of pending logins
+	stop() // stdio is over: the socket is stopped too, and the process leaves
+	finishServing(sock, app)
 	if err != nil && ctx.Err() == nil {
 		log.Fatalf("server: %v", err)
 	}
+}
+
+// finishServing ends what runs beside stdio and lets go of what the process holds. It waits for the socket to stop, so that the socket
+// file is gone before the process is; when the socket was served, the vault is locked first, as the daemon does, so that the
+// passphrase is not kept past the process. (Stdio alone has never done it: the process ends and its memory goes with it.)
+func finishServing(sock *socketServer, app *mcpserver.Server) {
+	sock.wait()
+	if sock.active() {
+		app.Lock()
+	}
+	app.Close() // tear down tunnels of pending logins
 }
