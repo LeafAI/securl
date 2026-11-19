@@ -329,7 +329,11 @@ An agent can send to, and read from, chats you name, through a bot. It never get
    holds the token controls the bot.
 2. **Put it in the group** (it need not be an admin). **For a channel the bot must be an administrator**: Telegram sends a bot the posts
    of a channel only then, and a bot that is merely a member reads an empty channel with no error. A channel's id is negative and starts
-   with `-100`, as a supergroup's does; `https://api.telegram.org/bot<token>/getChat?chat_id=<id>` says which it is (`"type": "channel"`). To let it read all messages and not only mentions, replies and commands, turn
+   with `-100`, as a supergroup's does; `https://api.telegram.org/bot<token>/getChat?chat_id=<id>` says which it is (`"type": "channel"`).
+   **Only what is posted after the first read can be read.** Telegram keeps no history of a channel for a bot and drops the posts a bot
+   had not asked for at the time, so the posts made before securl first asked for them are gone for good: an empty first read does not
+   mean the channel was silent, and there is no way to fetch the earlier ones. Do not poll the same bot from another program (a script
+   with `curl`, say) while securl reads it: `getUpdates` hands an update to whoever asks first, and the two would split the posts. To let it read all messages and not only mentions, replies and commands, turn
    privacy off: `@BotFather`, `/setprivacy`, pick the bot, `Disable`, then take the bot out of the group and add it again (Telegram
    applies the setting only to a new membership). With privacy on, `telegram_read` still works and says it sees only part.
 3. **Find the chat id.** Write a message in the group and open

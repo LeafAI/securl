@@ -483,7 +483,11 @@ posted it, in this order: the post's **author signature** (a channel that signs 
 is optional), else the sender chat's title, else the channel's own title; `from_bot` says whether that user is a bot. Every one of these is a
 name its author chose, so it proves nothing. A picture's caption is its text.
 `notice` covers posts: anybody who can post in the channel wrote one. A bot that is not an administrator reads an empty channel, with no
-error: Telegram sends it nothing, and securl cannot tell that from silence. With the bot's **privacy mode**
+error: Telegram sends it nothing, and securl cannot tell that from silence. **Only posts made after the bot first asked for `channel_post`
+can be read**: Telegram keeps no history of a channel for a bot, and drops what it was not asked for at the time (the Bot API has no call
+that reads a channel's past posts), so what was posted before the first read is gone for good, and an empty first read does not mean the
+channel was silent. securl asks for them on every read, so from the first read on nothing is lost. Do not read the same bot from another
+program at the same time (a `getUpdates` takes what it returns, and its `allowed_updates` becomes the bot's): the two would split the posts. With the bot's **privacy mode**
 on, a bot in a group sees only messages that mention it, reply to it or are commands; the answer says so, because an empty answer
 would otherwise read as "nobody spoke". Each read is audited (`telegram_read`: bot, chat, count, never a message).
 
