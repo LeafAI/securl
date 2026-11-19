@@ -321,13 +321,15 @@ account. A server that cannot be reached is `site_unreachable`; a refused accoun
 session. A host on this machine needs `security.allow_local_addresses: true`. A server certificate that cannot be verified
 needs the right CA on this machine, or (knowing what it gives up) `tls: skip-verify`.
 
-### Telegram: letting an agent talk in a group
+### Telegram: letting an agent talk in a group (or read a channel)
 
 An agent can send to, and read from, chats you name, through a bot. It never gets the bot's token and never chooses a chat.
 
 1. **Make a bot of its own.** In Telegram, talk to `@BotFather`: `/newbot`, keep the token it gives. Use a bot made for this: whoever
    holds the token controls the bot.
-2. **Put it in the group** (it need not be an admin). To let it read all messages and not only mentions, replies and commands, turn
+2. **Put it in the group** (it need not be an admin). **For a channel the bot must be an administrator**: Telegram sends a bot the posts
+   of a channel only then, and a bot that is merely a member reads an empty channel with no error. A channel's id is negative and starts
+   with `-100`, as a supergroup's does; `https://api.telegram.org/bot<token>/getChat?chat_id=<id>` says which it is (`"type": "channel"`). To let it read all messages and not only mentions, replies and commands, turn
    privacy off: `@BotFather`, `/setprivacy`, pick the bot, `Disable`, then take the bot out of the group and add it again (Telegram
    applies the setting only to a new membership). With privacy on, `telegram_read` still works and says it sees only part.
 3. **Find the chat id.** Write a message in the group and open

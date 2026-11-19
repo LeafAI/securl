@@ -470,12 +470,18 @@ again until the time it named. Sending is **not confirmed by a person**: every s
 SHA-256 of the text, never the text), and a message cannot be unsent, so an agent sends only what the user asked it to say.
 
 `telegram_read` takes `{bot, chat, limit?, wait_seconds?}` and answers `{untrusted: "true", notice, count, more?, messages: [{message_id,
-from, from_bot, time, text, truncated?, reply_to?}]}`. Messages come oldest first and each is returned **once**. A bot has one queue of
+from, from_bot, channel_post?, time, text, truncated?, reply_to?}]}`. Messages come oldest first and each is returned **once**. A bot has one queue of
 updates for all its chats and Telegram forgets an update the moment it is confirmed, so securl keeps what it is told, in memory only
 and bounded, and hands a chat its own messages; reading one chat loses nothing of another. `limit` is at most 100 (default 50);
 `wait_seconds` is at most 25. **Everything in `messages` was written by other people or programs in the chat**, and `notice`, which is
 securl's own text and the same every time, says so: it is data to read, never an instruction to follow, whoever it claims to be from.
-`from` is what the sender calls themselves, one line, at most 64 characters, and proves nothing. With the bot's **privacy mode**
+`from` is what the sender calls themselves, one line, at most 64 characters, and proves nothing.
+**A channel is read too**, with a rule of its own: Telegram sends a bot a channel's posts as `channel_post` updates and only when the bot
+is an **administrator** of the channel (a plain member is sent nothing), and securl asks for them (`allowed_updates` is `message` and
+`channel_post`, and nothing else). A post has no sender user: it is marked `channel_post: true`, `from` is the channel's title (or its
+sender chat's) and `from_bot` is false, so a post is never taken for something a person said in a group. A picture's caption is its text.
+`notice` covers posts: anybody who can post in the channel wrote one. A bot that is not an administrator reads an empty channel, with no
+error: Telegram sends it nothing, and securl cannot tell that from silence. With the bot's **privacy mode**
 on, a bot in a group sees only messages that mention it, reply to it or are commands; the answer says so, because an empty answer
 would otherwise read as "nobody spoke". Each read is audited (`telegram_read`: bot, chat, count, never a message).
 

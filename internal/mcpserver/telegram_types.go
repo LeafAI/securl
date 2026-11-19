@@ -44,10 +44,12 @@ type TelegramMessage struct {
 	MessageID int64  `json:"message_id"`
 	From      string `json:"from"` // what the sender calls themselves: it can be anything, so it proves nothing
 	FromBot   bool   `json:"from_bot"`
-	Time      string `json:"time"`
-	Text      string `json:"text"`
-	Truncated bool   `json:"truncated,omitempty"`
-	ReplyTo   int64  `json:"reply_to,omitempty"`
+	// ChannelPost is true for a post in a channel: it has no sender user, and From is the channel's title.
+	ChannelPost bool   `json:"channel_post,omitempty"`
+	Time        string `json:"time"`
+	Text        string `json:"text"`
+	Truncated   bool   `json:"truncated,omitempty"`
+	ReplyTo     int64  `json:"reply_to,omitempty"`
 }
 
 // TelegramReadOutput is what was said in a chat. Notice is securl's own text, the same every time, and says what the messages are.
