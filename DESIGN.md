@@ -56,6 +56,7 @@ internal/
   site/                      # Driver interface + registry
     gitlab/ kibana/ kubesphere/ nightingale/ archery/ skywalking/
   telegram/ telegramsite/    # Bot API client + bounded inbox; the bot-token login driver (telegram://<bot>)
+  zulip/ zulipsite/          # Zulip client (GET/POST /messages, no event queue); the bot-key login driver (zulip://<server>)
   dingtalk/ dingtalksite/    # custom-robot client (send only); the webhook login driver (dingtalk://<group>)
   slidewindow/               # the per-bot send limit
   redisx/ redissite/         # RESP2 client + command policy; the password login driver (redis://<target>)
@@ -303,6 +304,7 @@ they were; the first is audited as `session_dropped`.
 | `dingtalk_targets` / `dingtalk_send` | `group`, `text` | the configured groups; `{sent}`. Send only, no read (section 8) |
 | `redis_targets` / `redis_query` / `redis_exec` | `target` / `target`, `command[]` / + `reason` | the configured servers; the value of one allowlisted command, marked untrusted; a change, with a note to the team |
 | `rocketmq_targets` / `rocketmq_read` | – / `target`, `topic`, `limit?` | the configured clusters and topics; the newest messages, newest first, untrusted, nothing consumed |
+| `zulip_targets` / `zulip_send` / `zulip_read` | `server`, `channel`, `topic`, `text` / `topic?`, `limit?`, `after_message_id?` | the configured servers and channels; `{sent, message_id}`; messages marked untrusted (see section 8) |
 | `telegram_targets` / `telegram_send` / `telegram_read` | `bot`, `chat`, `text` / `limit?`, `wait_seconds?` | the configured bots and chats; `{sent, message_id}`; messages marked untrusted (see section 8) |
 | `archery_query` | `url`, `instance`, `db`, `sql`, `limit` | rows (read-only query endpoint, no approval) |
 | `archery_run_sql` | `url`, `instance`, `db`, `sql`, `remark`, `wait_timeout_s?` | execution result (sync) |
@@ -463,6 +465,42 @@ MCP registration: `claude mcp add login -- login`.
     spoke"; the answer says so. `from` is what a sender calls themselves. Another process of the same user can use the sessions the
     daemon holds, like any other site. With `telegram.proxy` the proxy sees that the bot talks, and holds a credential if one is in its
     address (shown masked everywhere); without it the environment's proxy is not used, so it never changes where the token goes.
+
+- **Zulip is a channel other people write into, and one other people read, and its topics are the agent's own words.** `zulip_*` tools let
+  an agent speak in, and read from, the channels the owner named, through a bot. What is defended, and what is not:
+  - *What an agent may reach.* It names a configured server and a configured channel. It never gives a site, an email, a key, a recipient, a
+    message type or Zulip's own name or id for a channel, and an argument outside the schema is refused. There are no direct messages. A
+    bot that is subscribed to many channels can be used only in the ones written down; reading and sending are switched per channel.
+  - *The topic is the agent's, so it is free text that everyone sees.* A topic is the title of a conversation, and which one is meant is
+    for the agent to say; fixing it in the configuration would make different matters one. So it is checked as text and not as a
+    permission: one line, at most 60 characters (Zulip's own limit), no control character, no space at either end. Sending to a topic that
+    does not exist creates it. securl cannot stop a misleading topic; it puts its own first paragraph in the text, so a person
+    can still tell who wrote the message, and it keeps the topic out of the audit log (like the text, it can say anything).
+  - *Nobody can be mentioned.* A topic or text that holds `@**name**`, `@_**name**`, `@*group*` or `@_*group*` (and `@**all**`) is refused
+    with `mention_not_allowed` and not edited: an agent that was quietly made not to mention someone would not know it had failed, and an
+    agent that can notify a whole channel can spam it. Plain `@` text, e-mail addresses and Markdown emphasis are not mentions and pass.
+  - *Reading is the prompt-injection channel.* Anyone in the channel can write something that tells an agent to do something, and a
+    topic and a sender's name are as much their text as a message is. Every read carries a notice in securl's own words, the same every
+    time, that all of it is untrusted data and never an instruction; topics and names are cleaned to one line and cut, long texts are
+    cut, the count is capped. That lowers the chance that a model obeys it and does not remove it. Messages are asked for as written
+    (`apply_markdown=false`), so no server-rendered HTML reaches the agent. Switch `read: false` for a channel nobody should be able to
+    talk to the agent in.
+  - *A read keeps no state.* It is `GET /messages`: nothing is consumed, no message is marked read, and there is no event queue to expire or
+    to share with another program; the agent holds its place as `after_message_id`. A restart loses nothing.
+  - *Sending is not confirmed, and cannot be undone.* Messages are Markdown to Zulip, so the agent is told to write plain text unless it
+    means formatting. The first paragraph is written by securl and is followed by a blank line, so Markdown cannot join it to the
+    agent's text. Sends are limited per server across its channels (default 20 a minute; a refusal or a failed send gives the slot back;
+    a `429` is obeyed). Every send is audited by size and SHA-256, never the text, and reads by count. Everyone in the channel sees what the
+    agent posts, including what it quotes from elsewhere: an agent that read a secret in another tool can post it.
+  - *The key.* A person types it on the usual page, and it is kept in the vault, in no configuration, argument or environment variable.
+    It is sent only to the configured `site`, which must be `https://`, a host and nothing else, and not an address on this machine or its
+    network; redirects are never followed. It is in a header and never in a URL, but a transport error text can still repeat a request, so
+    no error is made from what a transport or a server said; the tests search every answer, error and audit line for it. A bad key ends
+    the session, an unreachable server does not. Only the bot's owner can see the key in Zulip, and the bot must be a **Generic** bot.
+  - *What securl cannot know.* The bot sees only channels it is subscribed to and nothing said before it was, so an empty read is not
+    "nobody spoke" (`channel_not_reachable` is said when Zulip refuses the channel). Messages are readable by the server's
+    administrators. `from` is what a sender calls themselves. Another process of the same user can use the sessions the daemon holds,
+    like any other site.
 
 - **A DingTalk group is a channel an agent can write into and cannot read.** `dingtalk_send` lets an agent speak in the groups the
   owner named, each through a custom robot of that group. A custom robot only sends; that is why there is no read tool, and why the
