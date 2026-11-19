@@ -146,6 +146,10 @@ type Round struct {
 	ch       chan Submission
 
 	onFinalRead func()
+	// finalRead is set when the page has read a final state and nobody was registered to be told: a callback registered afterwards is
+	// told at once. The login ends, the status turns final and the page polls it, and the owner registers its callback only after
+	// the end of the login has been decided; a read in that gap would otherwise be lost, and the tunnel would stay up to the long cap.
+	finalRead bool
 }
 
 // NewRoundFor registers a new round for a site with a fresh random token and a fresh one-shot seal password.
@@ -208,8 +212,17 @@ func (r *Round) Status() Status {
 
 // OnFinalRead registers fn, called once when the page has read a final state (done, failed, rejected) of this round
 // by polling status. The tunnel is only needed until then.
+//
+// When the page has already read a final state and nothing was registered to hear of it, fn is called at once, here, and once: that read
+// has happened and is not waited for again.
 func (r *Round) OnFinalRead(fn func()) {
 	r.mu.Lock()
+	if r.finalRead && fn != nil {
+		r.finalRead = false
+		r.mu.Unlock()
+		fn()
+		return
+	}
 	r.onFinalRead = fn
 	r.mu.Unlock()
 }
@@ -223,6 +236,9 @@ func (r *Round) noteRead(st Status) {
 	r.mu.Lock()
 	fn := r.onFinalRead
 	r.onFinalRead = nil
+	if fn == nil {
+		r.finalRead = true // nobody to tell yet: whoever registers next is told at once
+	}
 	r.mu.Unlock()
 	if fn != nil {
 		fn()
