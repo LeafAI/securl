@@ -348,9 +348,17 @@ tool carries a title and a generated output schema; results are validated agains
 * **Audit** (`audit:`). One JSON line per tool call (`tool_call`), per login request that reaches a person
   (`human_request`), per message sent to a person (`human_round`, with `mode` and `round`: a login with TOTP
   shows `login:1` then `totp:2`) and per refusal (`rate_limited`): time, tool, MCP client name/version, site, host, the
-  reason the agent gave, result or error code, duration. For SQL only the length and a 12-character SHA-256
-  prefix are kept. Cookies, tokens, passwords and SQL text never appear. File mode 0600; a write failure is
-  reported on stderr and never fails the call. On by default, file next to the config.
+  reason the agent gave, result or error code, duration. Each completed registered tool call also records
+  an allowlisted `arguments` object (destination or configured target, operation options, limits and applicable
+  flow/workflow IDs) and `outcome` object (status, counts, sizes and similar result metadata). Errors record
+  `retryable`, not their potentially sensitive message. Invalid arguments rejected by the tool handler are
+  audited without recording their raw input. No generic serialization of inputs or outputs is permitted.
+  SQL and sent message text are represented by length and a 12-character SHA-256 prefix; HTTP input paths
+  in the call summary use the same representation, while query/header/form values and bodies are excluded.
+  The existing successful HTTP request event still records the path, not the query. Returned content,
+  Redis keys/values, Zulip topics, authorization links, cookies, tokens and passwords are not added to
+  the detailed records. Agent-controlled labels and reasons remain metadata: do not put secrets in them.
+  File mode 0600; a write failure is reported on stderr and never fails the call. On by default, file next to the config.
 * **Limits** (`limits:`). Only requests that actually reach a person count; a cached session is free and a
   caller joining a running flow is not counted again. Defaults: 6 per site and 20 overall per hour, and a
   10-minute pause for a site after the person pressed Reject. A refused request returns `rate_limited`
