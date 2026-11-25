@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -312,15 +313,21 @@ func readAudit(t *testing.T, e *tgEnv) string {
 func TestEverySendIsAuditedWithTheTargetAndTheSizeAndAHashButNeverTheText(t *testing.T) {
 	e := withTelegram(t, true, nil)
 	secretText := "the staging password is hunter2 and the number is 4111-1111"
-	send(t, e, "alerts", secretText)
+	if out, isErr := send(t, e, "alerts", secretText); isErr {
+		t.Fatal(out)
+	}
 	a := readAudit(t, e)
 	if !strings.Contains(a, `"event":"telegram_send"`) || !strings.Contains(a, "ops") || !strings.Contains(a, "alerts") {
 		t.Errorf("the send is audited with its target:\n%s", a)
 	}
-	if !strings.Contains(a, "text_bytes") || !strings.Contains(a, "text_sha256") {
-		t.Errorf("with the size and a hash, so a message can be matched to a statement without being stored:\n%s", a)
+	sum := sha256.Sum256([]byte(secretText))
+	if !strings.Contains(a, fmt.Sprintf(`"text_bytes":%d`, len(secretText))) ||
+		!strings.Contains(a, fmt.Sprintf(`"text_sha256":"%x"`, sum[:6])) {
+		t.Errorf("with the exact size and hash, so a message can be matched to a statement without being stored:\n%s", a)
 	}
-	for _, leak := range []string{"hunter2", "4111", "staging password", "AAH-SECRET", "-1001111111111"} {
+	// Short digit sequences can legitimately appear in timestamps, hashes or
+	// durations. Check the distinctive complete number instead.
+	for _, leak := range []string{"hunter2", "4111-1111", "staging password", "AAH-SECRET", "-1001111111111"} {
 		if strings.Contains(a, leak) {
 			t.Errorf("the audit log carries %q:\n%s", leak, a)
 		}
