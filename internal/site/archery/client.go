@@ -45,7 +45,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, conte
 	}
 	resp, err := site.NoRedirect(c.HC).Do(req)
 	if err != nil {
-		return 0, "", fmt.Errorf("%w: %v", site.ErrUnreachable, err)
+		return 0, "", fmt.Errorf("%w: %w", site.ErrUnreachable, err)
 	}
 	return resp.StatusCode, site.ReadBody(resp), nil
 }

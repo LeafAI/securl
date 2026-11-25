@@ -10,6 +10,7 @@ import (
 
 	"github.com/LeafAI/securl/internal/audit"
 	"github.com/LeafAI/securl/internal/proxy"
+	"github.com/LeafAI/securl/internal/remember"
 	"github.com/LeafAI/securl/internal/session"
 	"github.com/LeafAI/securl/internal/site"
 )
@@ -44,13 +45,19 @@ func (s *Server) request(ctx context.Context, _ *mcp.CallToolRequest, in Request
 	if !s.cfg.Security.AllowArcheryRequests && s.isArchery(siteName, base) {
 		return nil, archeryRequestRefusal()
 	}
-	px := &proxy.Proxy{HC: s.hc, MaxResponseBytes: in.MaxResponseBytes}
+	px := &proxy.Proxy{HC: s.grantClient(s.hc, base, sess.ApprovalID), MaxResponseBytes: in.MaxResponseBytes}
 	res, err := px.Do(ctx, sess, proxy.Request{
 		Base: base, Method: in.Method, Path: in.Path, Query: multiValues(in.Query), Headers: in.Headers,
 		JSON: in.JSON, Form: multiValues(in.Form), Text: in.Text, Base64: in.Base64,
 		FollowRedirects: in.FollowRedirects, Timeout: time.Duration(in.TimeoutSeconds) * time.Second,
 	})
 	if err != nil {
+		if sess.ApprovalID != "" {
+			r, e := remember.Load(s.vault, site.Key(base))
+			if e != nil || !r.Valid(time.Now()) || r.Revision != sess.ApprovalID {
+				return nil, classify(remember.ErrApprovalRequired)
+			}
+		}
 		return nil, requestErr(err)
 	}
 	if res.NewSession != nil {
@@ -112,6 +119,20 @@ func (s *Server) sessionFor(ctx context.Context, k *core, base *url.URL) (string
 		return d.Name(), &site.Session{}, nil
 	}
 	e, err := k.cache.Lookup(ctx, base, s.hc, s.fresh)
+	if err != nil && !errors.Is(err, site.ErrUnreachable) {
+		if r, loadErr := remember.Load(s.vault, site.Key(base)); loadErr == nil && r.Valid(time.Now()) {
+			// A request may renew silently, but never initiate a human round.
+			d, resolveErr := site.Resolve(r.Site, base)
+			if resolveErr != nil {
+				return "", nil, classify(resolveErr)
+			}
+			_, loginErr := (rememberedDriver{Driver: d, s: s, cache: k.cache}).Login(ctx, base, nil, s.hc)
+			if loginErr != nil {
+				return "", nil, classify(loginErr)
+			}
+			e, err = k.cache.Lookup(ctx, base, s.hc, s.fresh)
+		}
+	}
 	if err != nil {
 		te := sessionLost(err, base.Host, requestExpiredHint, "there is no valid session for "+base.Host)
 		if te.Code == "no_session" {
@@ -137,6 +158,8 @@ func (s *Server) siteBase(raw string) (*url.URL, *ToolError) {
 
 func requestErr(err error) *ToolError {
 	switch {
+	case errors.Is(err, remember.ErrApprovalRequired):
+		return classify(err)
 	case errors.Is(err, proxy.ErrInvalid):
 		return errf("invalid_argument", false, "%v", err)
 	case errors.Is(err, proxy.ErrSessionExpired):

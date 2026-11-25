@@ -96,6 +96,24 @@ SHA-256 against tampering, because SHA-1 collisions can be made. Windows gets a 
 because you downloaded one archive and the file lists all of them. The nightly is a build of the newest `master`, not a
 tested release.
 
+## Build a macOS installer locally
+
+On macOS, from the repository root:
+
+```bash
+make macos
+open dist/securl_macos.pkg
+```
+
+The target builds the Apple silicon and Intel binaries and uses the same universal installer
+builder as the nightly release. It only builds the package; it does not install anything.
+Override the output directory with `DIST` or the package build version with
+`MACOS_VERSION=nightly-YYYYMMDD-<commit>` (the default uses the current Git commit).
+The package installs `/usr/local/bin/securl` and sets up the per-user launch agent, starting
+the daemon locked. Locally built packages are unsigned unless separately signed with a
+Developer ID Installer certificate; macOS may require explicit approval in System Settings
+before opening them.
+
 ## Linux packages (DEB / RPM)
 
 For Debian/Ubuntu or Amazon Linux 2023, build a native installer from a trusted checkout of this repository.
@@ -259,6 +277,44 @@ a daemon restart locks its vault and interrupts pending login flows.
 
 The static page is served by GitHub Pages (version-pinned) or from your disk (`securl page [dir]`); the tunnel
 carries only ciphertext. See `DESIGN.md` (architecture, threat model) and `MCP_TOOLS.md` (tool schemas).
+
+### Remember GitLab and Archery credentials (optional)
+
+Use the same protected web page as the existing login. When an agent opens a GitLab or Archery
+HTTPS session, the page offers an unchecked **Remember credentials** option. Select it and enter
+the upstream authenticator's Base32 setup secret (not a six-digit code). securl saves the credentials
+only after successful upstream authentication; this also starts the first authorization (24 hours by default).
+Leave the option unchecked to use the existing interactive username/password and one-time-code flow.
+
+While the grant is valid, securl reuses valid sessions or silently signs in again, generating the
+upstream TOTP itself. Renewal never extends the grant. After the authorized duration even a still-valid cookie
+cannot be used until the human approves again. The grant survives server restarts, but the existing
+vault-unlock rules still apply. GitLab and Archery instances are independent.
+
+Set the desired authorization duration in config.yaml:
+
+```yaml
+security:
+  credential_authorization_ttl: 24h # default; e.g. 8h, 30m, 168h
+```
+
+The page and DingTalk message display the configured duration. It is saved with each new grant;
+a configuration change takes effect for subsequent approvals after restarting securl and does not
+extend or shorten a previously granted authorization. Use session_close to revoke an existing grant.
+
+The daily approval page offers **Approve**, **Reject**, **Update credentials**, and **Forget credentials**.
+To open it before the current grant expires, call the existing session_open tool with
+manage_credentials set to true. No credentials are passed in tool arguments. Confirmed session_close
+revokes the current grant while retaining remembered credentials. Forgetting credentials removes them
+and requires re-enrollment on the web page. No new credential CLI commands are needed.
+
+Use the updated static page (the same release as the server). With `link_via_agent`, a securl link or seal TOTP
+factor must be enabled; a link alone would let the agent approve its own request. Existing securl factors are
+separate from the upstream TOTP seed. Archery's workflow approvals and SQL restrictions are unchanged.
+
+Storing the upstream password and TOTP seed together trades upstream factor separation for convenience: protect
+the vault passphrase and host. The grant controls securl's use of the credential, not direct upstream access,
+and cannot recall a request that has already been sent.
 
 ## Production deployment
 
@@ -440,6 +496,7 @@ security:
   allowed_hosts: ["*.corp.example"]   # optional: the agent may only log in to matching hosts
   allow_local_addresses: false        # true lets the agent reach localhost / link-local / metadata addresses (dev only)
   allow_archery_requests: false       # true lets the request tool talk to Archery, which skips the approval gate of archery_run_sql
+  credential_authorization_ttl: 24h   # lifetime of a remembered-credential grant
   link_via_agent: false               # true, with no dingtalk.webhook: the login link is returned to the agent to show you (see docs/OPERATING.md)
 databases:                   # PostgreSQL / MySQL for dev, test or staging; `securl config db add` writes this
                              # production is refused (use Archery)

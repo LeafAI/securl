@@ -17,6 +17,16 @@
   $('ver').textContent = 'v' + PAGE_VERSION;
 
   const MODES = {
+    credential_setup: { label: 'Sign in', fields: [
+      { name: 'username', label: 'Username', type: 'text', ac: 'off' },
+      { name: 'password', label: 'Password', type: 'password', ac: 'off' },
+      { name: 'remember', label: 'Remember credentials and authorize access', type: 'checkbox', ac: 'off' },
+      { name: 'totp_secret', label: 'Upstream TOTP setup secret (Base32)', type: 'password', ac: 'off', rememberOnly: true }] },
+    credential_replace: { label: 'Replace remembered credentials', fields: [
+      { name: 'username', label: 'Username', type: 'text', ac: 'off' },
+      { name: 'password', label: 'Password', type: 'password', ac: 'off' },
+      { name: 'totp_secret', label: 'Upstream TOTP setup secret (Base32)', type: 'password', ac: 'off' }] },
+    daily_approval: { label: 'Authorize agent access', fields: [] },
     login: { label: 'Sign in', fields: [
       { name: 'username', label: 'Username', type: 'text', ac: 'off' },
       { name: 'password', label: 'Password', type: 'password', ac: 'off' }] },
@@ -218,9 +228,15 @@
     const label = ctx.mode === 'custom' ? 'Additional information' : MODES[ctx.mode].label;
     const fixed = ctx.mode !== 'custom' && MODES[ctx.mode].fixedTitle;
     // A fixed step shows no text that came from the link: not even the site name, which an attacker could write a sentence into.
-    document.title = fixed ? label : label + ' - ' + (ctx.site || 'Login');
-    $('title').textContent = fixed ? label : label + ' - ' + (ctx.site || 'site');
-    $('d-site').textContent = fixed ? 'The login vault (everything login keeps)' : (ctx.site || '(not given)');
+    const managed = ['credential_setup', 'credential_replace', 'daily_approval'].includes(ctx.mode);
+    const grant = managed ? /^(https:\/\/[^\s]+) \| Grant: ([0-9.hmsµun]+)$/.exec(ctx.site) : null;
+    if (managed && !grant) throw new Error('Missing or invalid authorization duration. Ask for a new login.');
+    const siteLabel = grant ? grant[1] : ctx.site;
+    $('d-duration-label').hidden = $('d-duration').hidden = !grant;
+    $('d-duration').textContent = grant ? grant[2] : '';
+    document.title = fixed ? label : label + ' - ' + (siteLabel || 'Login');
+    $('title').textContent = fixed ? label : label + ' - ' + (siteLabel || 'site');
+    $('d-site').textContent = fixed ? 'The login vault (everything login keeps)' : (siteLabel || '(not given)');
     $('d-mode').textContent = label + ' (step ' + ctx.round + ')';
     $('d-host').textContent = new URL(ctx.api).host;
     $('d-fpr').textContent = grouped(ctx.fpr);
@@ -231,6 +247,16 @@
 
     const box = $('fields');
     box.textContent = '';
+    if (ctx.mode === 'credential_setup' || ctx.mode === 'credential_replace' || ctx.mode === 'daily_approval') {
+      const note = document.createElement('p');
+      note.textContent = ctx.mode === 'daily_approval'
+        ? 'Approve access for the duration shown above using saved credentials. Update or forget them if needed. Reject does not create or extend a grant. To end an existing grant, close the session or forget the credentials.'
+        : 'Remembering credentials stores your username, password and authenticator setup secret in the encrypted vault after successful sign-in. Use the Base32 setup secret, not a six-digit code. The first grant lasts for the duration shown above.';
+      box.append(note);
+    }
+    $('submit').textContent = ctx.mode === 'daily_approval' ? 'Approve' : (ctx.mode === 'credential_replace' ? 'Replace and authorize' : (ctx.mode === 'credential_setup' ? 'Sign in' : 'Submit'));
+    $('replace-credentials').hidden = ctx.mode !== 'daily_approval';
+    $('forget-credentials').hidden = ctx.mode !== 'daily_approval';
     ctx.fields.forEach((f) => {
       const l = document.createElement('label');
       l.htmlFor = 'f-' + f.name;
@@ -253,6 +279,14 @@
       inp.setAttribute('autocorrect', 'off');
       if (f.numeric) inp.inputMode = 'numeric';
       box.append(inp);
+      if (f.rememberOnly) {
+        const update = () => {
+          l.hidden = inp.hidden = inp.disabled = !$('f-remember').checked;
+          if (inp.disabled) inp.value = '';
+        };
+        $('f-remember').addEventListener('change', update);
+        update();
+      }
     });
     if (ctx.factorDigits > 0) {
       const l = document.createElement('label');
@@ -268,6 +302,7 @@
       inp.spellcheck = false;
       box.append(inp);
     }
+    setBusy(false);
     $('verified').focus();
   }
 
@@ -426,6 +461,7 @@
   function setBusy(on) {
     busy = on;
     $('submit').disabled = on || !$('verified').checked;
+    $('replace-credentials').disabled = $('forget-credentials').disabled = on || !$('verified').checked;
     $('reject').disabled = on;
     $('reject-cancel').disabled = on;
   }
@@ -442,13 +478,21 @@
     }
   }
 
-  async function run(action) {
+  async function run(action, decision = 'APPROVE') {
     if (busy) return;
     let fields = {};
     let reason = '';
     if (action === 'submit') {
+      if (!$('verified').checked) return;
+      if (ctx.mode === 'daily_approval') fields.confirm = decision;
       for (const f of ctx.fields) {
-        const v = $('f-' + f.name).value;
+        const input = $('f-' + f.name);
+        if (input.disabled) continue;
+        if (f.type === 'checkbox') {
+          fields[f.name] = input.checked ? 'yes' : 'no';
+          continue;
+        }
+        const v = input.value;
         if (v === '') {
           say('Please fill in: ' + f.label + '.', 'bad');
           $('f-' + f.name).focus();
@@ -553,7 +597,11 @@
   $('form').addEventListener('submit', (ev) => { ev.preventDefault(); run('submit'); });
   $('unlock-go').addEventListener('click', () => { unlock(); });
   $('unlock-code').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); unlock(); } });
-  $('verified').addEventListener('change', () => { $('submit').disabled = busy || !$('verified').checked; });
+  $('verified').addEventListener('change', () => setBusy(busy));
+  $('replace-credentials').addEventListener('click', () => run('submit', 'REPLACE'));
+  $('forget-credentials').addEventListener('click', () => {
+    if (window.confirm('Permanently forget the stored credentials for this site?')) run('submit', 'FORGET');
+  });
   $('reject').addEventListener('click', () => {
     if ($('reject-box').hidden) showRejectBox(true); else run('reject');
   });

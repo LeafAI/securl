@@ -73,10 +73,13 @@ type Credentials map[string]string
 
 // Session is the result handed back to the agent.
 type Session struct {
-	Cookies   []*http.Cookie    `json:"-"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	Tokens    map[string]string `json:"tokens,omitempty"`
-	ExpiresAt time.Time         `json:"expires_at,omitempty"`
+	ApprovalDuration time.Duration     `json:"-"`
+	ApprovalID       string            `json:"-"` // binds the session to an individual grant
+	ApprovalAt       time.Time         `json:"-"` // internal binding to a remembered-credential authorization
+	Cookies          []*http.Cookie    `json:"-"`
+	Headers          map[string]string `json:"headers,omitempty"`
+	Tokens           map[string]string `json:"tokens,omitempty"`
+	ExpiresAt        time.Time         `json:"expires_at,omitempty"`
 }
 
 // Driver implements the login flow of one kind of website.

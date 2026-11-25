@@ -74,6 +74,7 @@ type Purpose struct {
 const maxDetail = 900
 
 type Config struct {
+	AuthorizationTTL time.Duration // duration presented for remembered credential consent
 	// Purpose, when set, replaces the login wording of every message of this manager.
 	Purpose  *Purpose
 	Keys     keyring.Source
@@ -523,6 +524,14 @@ func (f *Flow) restartTunnel(ctx context.Context) error {
 	return nil
 }
 
+// AuthorizationSite binds both the exact site and grant duration into the sealed round.
+func AuthorizationSite(base *url.URL, ttl time.Duration) string {
+	if ttl == 0 {
+		ttl = 24 * time.Hour
+	}
+	return site.Key(base) + " | Grant: " + ttl.String()
+}
+
 // Ask implements site.Asker: it runs one human round.
 func (f *Flow) Ask(ctx context.Context, mode string, fields []site.Field) (site.Credentials, error) {
 	f.set(Snapshot{Phase: "starting", Mode: mode, Round: f.rounds + 1})
@@ -540,7 +549,11 @@ func (f *Flow) Ask(ctx context.Context, mode string, fields []site.Field) (site.
 		f.cur.SetStatus(api.StateNextRound, "")
 	}
 	f.rounds++
-	round := f.srv.NewRoundAt(web.BoundSite(f.Base.Host), mode, f.rounds, time.Now())
+	displaySite := f.Base.Host
+	if mode == "daily_approval" || mode == "credential_setup" || mode == "credential_replace" {
+		displaySite = AuthorizationSite(f.Base, f.m.cfg.AuthorizationTTL)
+	}
+	round := f.srv.NewRoundAt(web.BoundSite(displaySite), mode, f.rounds, time.Now())
 	f.cur = round
 
 	pub, err := f.key.PublicKeyBinary()
@@ -556,7 +569,7 @@ func (f *Flow) Ask(ctx context.Context, mode string, fields []site.Field) (site.
 	expires := time.Now().Add(f.m.cfg.TTL)
 	send := func(note string) error {
 		wr := web.Round{
-			Site: f.Base.Host, Mode: mode, N: f.rounds,
+			Site: displaySite, Mode: mode, N: f.rounds,
 			APIBase:   strings.TrimRight(f.tn.PublicURL(), "/") + "/" + round.Token,
 			PublicKey: pub, Fingerprint: f.key.Fingerprint(), Password: round.Password(), Fields: cf,
 		}
@@ -723,7 +736,11 @@ func (f *Flow) finish(sess *site.Session, err error) {
 func (f *Flow) pageIsListening() bool { return f.cur != nil && f.tn != nil }
 
 func message(f *Flow, mode string, n int, link, fpr string, expires time.Time, note string, unlockOn, sealOn bool) string {
-	step := map[string]string{"login": "username & password", "totp": "two-factor code", "custom": "additional information"}[mode]
+	ttl := 24 * time.Hour
+	if f.m != nil && f.m.cfg.AuthorizationTTL > 0 {
+		ttl = f.m.cfg.AuthorizationTTL
+	}
+	step := map[string]string{"login": "username & password", "totp": "two-factor code", "custom": "additional information", "daily_approval": "approve agent access for " + ttl.String() + ", or update or forget credentials", "credential_setup": "sign in; optionally remember credentials and authorize access for " + ttl.String(), "credential_replace": "replace saved credentials and authorize access for " + ttl.String()}[mode]
 	if step == "" {
 		step = mode
 	}

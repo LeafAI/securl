@@ -32,17 +32,20 @@ type cookieJSON struct {
 }
 
 type record struct {
-	Site       string            `json:"site"`
-	Base       string            `json:"base"`
-	Cookies    []cookieJSON      `json:"cookies,omitempty"`
-	Headers    map[string]string `json:"headers,omitempty"`
-	Tokens     map[string]string `json:"tokens,omitempty"`
-	ExpiresAt  time.Time         `json:"expires_at,omitempty"`
-	ObtainedAt time.Time         `json:"obtained_at"`
+	ApprovalDuration time.Duration     `json:"approval_duration,omitempty"`
+	ApprovalID       string            `json:"approval_id,omitempty"`
+	ApprovalAt       time.Time         `json:"approval_at,omitempty"`
+	Site             string            `json:"site"`
+	Base             string            `json:"base"`
+	Cookies          []cookieJSON      `json:"cookies,omitempty"`
+	Headers          map[string]string `json:"headers,omitempty"`
+	Tokens           map[string]string `json:"tokens,omitempty"`
+	ExpiresAt        time.Time         `json:"expires_at,omitempty"`
+	ObtainedAt       time.Time         `json:"obtained_at"`
 }
 
 func toRecord(e *Entry) record {
-	r := record{Site: e.Site, Base: e.Base, Headers: e.Session.Headers, Tokens: e.Session.Tokens,
+	r := record{ApprovalDuration: e.Session.ApprovalDuration, ApprovalID: e.Session.ApprovalID, ApprovalAt: e.Session.ApprovalAt, Site: e.Site, Base: e.Base, Headers: e.Session.Headers, Tokens: e.Session.Tokens,
 		ExpiresAt: e.Session.ExpiresAt, ObtainedAt: e.ObtainedAt}
 	for _, c := range e.Session.Cookies {
 		r.Cookies = append(r.Cookies, cookieJSON{c.Name, c.Value, c.Domain, c.Path, c.Expires, c.Secure, c.HttpOnly})
@@ -51,7 +54,7 @@ func toRecord(e *Entry) record {
 }
 
 func (r record) session() *site.Session {
-	s := &site.Session{Headers: r.Headers, Tokens: r.Tokens, ExpiresAt: r.ExpiresAt}
+	s := &site.Session{ApprovalDuration: r.ApprovalDuration, ApprovalID: r.ApprovalID, ApprovalAt: r.ApprovalAt, Headers: r.Headers, Tokens: r.Tokens, ExpiresAt: r.ExpiresAt}
 	for _, c := range r.Cookies {
 		s.Cookies = append(s.Cookies, &http.Cookie{Name: c.Name, Value: c.Value, Domain: c.Domain, Path: c.Path,
 			Expires: c.Expires, Secure: c.Secure, HttpOnly: c.HTTPOnly})

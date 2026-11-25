@@ -389,3 +389,26 @@ func TestDefaultPathIsUnderSecurl(t *testing.T) {
 		t.Errorf("%s", got)
 	}
 }
+
+func TestCredentialAuthorizationTTL(t *testing.T) {
+	for _, tc := range []struct {
+		yaml string
+		want time.Duration
+		bad  bool
+	}{
+		{"", 24 * time.Hour, false},
+		{"security: {credential_authorization_ttl: 6h}", 6 * time.Hour, false},
+		{"security: {credential_authorization_ttl: -1h}", -time.Hour, true},
+	} {
+		c, err := Parse([]byte(tc.yaml), t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Security.AuthorizationTTL() != tc.want {
+			t.Fatalf("duration=%v want %v", c.Security.AuthorizationTTL(), tc.want)
+		}
+		if (c.Validate() != nil) != tc.bad {
+			t.Fatalf("unexpected validation for %s", tc.yaml)
+		}
+	}
+}
