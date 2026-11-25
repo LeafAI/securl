@@ -481,15 +481,17 @@ GitLab reCAPTCHA after repeated failures; WebAuthn/passkey-only accounts; Jenkin
 or KubeSphere (stock versions have none). These fail with an explanatory error rather than being guessed at.
 
 
-## Remembered GitLab and Archery login
+## Remembered website login
 
 Use the existing protected login page to enroll, replace or forget a site credential.
 For a site with a valid session, request the same page with session_open and manage_credentials=true.
-The enrolled TOTP secret is the Base32 seed from the upstream account's authenticator setup, not a one-time
-code or securl's own link/seal factor. Only HTTPS sites are supported. The approval window is measured from explicit consent, not a calendar day and not an idle timeout.
+An optional enrolled TOTP secret is the Base32 seed from the upstream account's authenticator setup, not a one-time
+code or securl's own link/seal factor. Password-only sites do not need a seed. CAPTCHA or one-time code
+challenges still require a person unless an applicable TOTP seed is saved. Generic and OAuth2 site
+configuration changes invalidate the old credential binding; use the management page to replace it. Only HTTPS sites are supported. The approval window is measured from explicit consent, not a calendar day and not an idle timeout.
 Set security.credential_authorization_ttl in config.yaml (default 24h, e.g. 8h or 30m). Restart securl to apply changes; existing grants retain their approved duration until expiration or revocation. Each exact site root has its own grant.
 
-An updated static page is required for the credential_setup, credential_replace and daily_approval modes. DingTalk is preferred; agent-delivered links
+An updated static page is required for the credential_setup, credential_replace, credential_totp and daily_approval modes. DingTalk is preferred; agent-delivered links
 require an independently held securl link or seal TOTP factor. On bad upstream credentials, the owner should
 replace the saved record rather than repeatedly retry. Vault restart/unlock rules and Archery SQL workflow
 approval are unaffected. Confirmed session_close revokes the grant without forgetting the credentials.

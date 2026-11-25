@@ -34,8 +34,9 @@ type driver struct {
 
 func init() { site.Register(&driver{}) }
 
-func (*driver) Name() string     { return "gitlab" }
-func (*driver) NeedsLogin() bool { return true }
+func (*driver) Name() string                      { return "gitlab" }
+func (*driver) RememberScope() (string, *url.URL) { return "", nil }
+func (*driver) NeedsLogin() bool                  { return true }
 func (*driver) Match(u *url.URL) bool {
 	return strings.Contains(strings.ToLower(u.Hostname()), "gitlab")
 }

@@ -18,6 +18,8 @@ package oauth2flow
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -47,7 +49,13 @@ func New(spec Spec) (site.Driver, error) {
 	return &driver{spec: spec, idp: idp}, nil
 }
 
-func (d *driver) Name() string     { return d.spec.Name }
+func (d *driver) Name() string { return d.spec.Name }
+
+// RememberScope binds saved credentials to this exact configured driver definition.
+func (d *driver) RememberScope() (string, *url.URL) {
+	b, _ := json.Marshal(d.spec)
+	return fmt.Sprintf("oauth2flow:%x", sha256.Sum256(b)), d.idp
+}
 func (d *driver) NeedsLogin() bool { return true }
 func (d *driver) Match(u *url.URL) bool {
 	return d.spec.MatchHost != "" && strings.Contains(strings.ToLower(u.Hostname()), strings.ToLower(d.spec.MatchHost))
@@ -56,7 +64,7 @@ func (d *driver) Match(u *url.URL) bool {
 // Detail is securl's own account of what the person agrees to; the agent's reason is shown next to it, not instead of it.
 func (d *driver) Detail(base *url.URL) string {
 	t := "securl will sign in to GitLab at " + d.idp.Host + " with the username and password you type, and use that sign-in once to " +
-		"log in to " + base.Host + ", which asks GitLab who you are. Your GitLab password is not kept."
+		"log in to " + base.Host + ", which asks GitLab who you are. Your GitLab password is not kept unless you explicitly choose to remember credentials."
 	if d.spec.consent() == ConsentApprove {
 		t += " If GitLab shows its first-time authorisation page for this site, securl will press Authorize."
 	}

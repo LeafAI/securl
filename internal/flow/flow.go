@@ -165,11 +165,12 @@ type Result struct {
 }
 
 type Flow struct {
-	ID     string
-	Site   string
-	Base   *url.URL
-	Reason string
-	Detail string // what the person agrees to, in securl's own words (see StartDetailed); empty for an ordinary login
+	ID               string
+	Site             string
+	Base             *url.URL
+	Reason           string
+	CredentialOrigin *url.URL // configured identity provider for remembered web credentials
+	Detail           string   // what the person agrees to, in securl's own words (see StartDetailed); empty for an ordinary login
 
 	m      *Manager
 	cancel context.CancelFunc
@@ -235,6 +236,9 @@ func (m *Manager) StartDetailed(d site.Driver, base *url.URL, reason, detail str
 	ctx, cancel := context.WithCancel(context.Background())
 	f := &Flow{ID: "lg_" + hex.EncodeToString(idb[:]), Site: d.Name(), Base: base, Reason: reason, Detail: detail,
 		m: m, cancel: cancel, done: make(chan struct{}), closed: make(chan struct{}), snap: Snapshot{Phase: "starting"}}
+	if cap, ok := d.(site.CredentialScope); ok {
+		_, f.CredentialOrigin = cap.RememberScope()
+	}
 	m.flows[f.ID] = f
 	m.byBase[key] = f
 	m.mu.Unlock()
@@ -525,11 +529,15 @@ func (f *Flow) restartTunnel(ctx context.Context) error {
 }
 
 // AuthorizationSite binds both the exact site and grant duration into the sealed round.
-func AuthorizationSite(base *url.URL, ttl time.Duration) string {
+func AuthorizationSite(base *url.URL, ttl time.Duration, origins ...*url.URL) string {
 	if ttl == 0 {
 		ttl = 24 * time.Hour
 	}
-	return site.Key(base) + " | Grant: " + ttl.String()
+	display := site.Key(base)
+	if len(origins) > 0 && origins[0] != nil {
+		display += " | Identity provider: " + site.Key(origins[0])
+	}
+	return display + " | Grant: " + ttl.String()
 }
 
 // Ask implements site.Asker: it runs one human round.
@@ -550,8 +558,8 @@ func (f *Flow) Ask(ctx context.Context, mode string, fields []site.Field) (site.
 	}
 	f.rounds++
 	displaySite := f.Base.Host
-	if mode == "daily_approval" || mode == "credential_setup" || mode == "credential_replace" {
-		displaySite = AuthorizationSite(f.Base, f.m.cfg.AuthorizationTTL)
+	if mode == "daily_approval" || mode == "credential_setup" || mode == "credential_replace" || mode == "credential_totp" {
+		displaySite = AuthorizationSite(f.Base, f.m.cfg.AuthorizationTTL, f.CredentialOrigin)
 	}
 	round := f.srv.NewRoundAt(web.BoundSite(displaySite), mode, f.rounds, time.Now())
 	f.cur = round
@@ -740,7 +748,7 @@ func message(f *Flow, mode string, n int, link, fpr string, expires time.Time, n
 	if f.m != nil && f.m.cfg.AuthorizationTTL > 0 {
 		ttl = f.m.cfg.AuthorizationTTL
 	}
-	step := map[string]string{"login": "username & password", "totp": "two-factor code", "custom": "additional information", "daily_approval": "approve agent access for " + ttl.String() + ", or update or forget credentials", "credential_setup": "sign in; optionally remember credentials and authorize access for " + ttl.String(), "credential_replace": "replace saved credentials and authorize access for " + ttl.String()}[mode]
+	step := map[string]string{"login": "username & password", "totp": "two-factor code", "custom": "additional information", "daily_approval": "approve agent access for " + ttl.String() + ", or update or forget credentials", "credential_setup": "sign in; optionally remember credentials and authorize access for " + ttl.String(), "credential_replace": "replace saved credentials and authorize access for " + ttl.String(), "credential_totp": "enter the upstream TOTP setup secret or a one-time code to complete remembered login"}[mode]
 	if step == "" {
 		step = mode
 	}

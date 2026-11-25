@@ -21,11 +21,14 @@
       { name: 'username', label: 'Username', type: 'text', ac: 'off' },
       { name: 'password', label: 'Password', type: 'password', ac: 'off' },
       { name: 'remember', label: 'Remember credentials and authorize access', type: 'checkbox', ac: 'off' },
-      { name: 'totp_secret', label: 'Upstream TOTP setup secret (Base32)', type: 'password', ac: 'off', rememberOnly: true }] },
+      { name: 'totp_secret', label: 'Upstream TOTP setup secret (Base32, if enabled)', type: 'password', ac: 'off', rememberOnly: true, optional: true }] },
     credential_replace: { label: 'Replace remembered credentials', fields: [
       { name: 'username', label: 'Username', type: 'text', ac: 'off' },
       { name: 'password', label: 'Password', type: 'password', ac: 'off' },
-      { name: 'totp_secret', label: 'Upstream TOTP setup secret (Base32)', type: 'password', ac: 'off' }] },
+      { name: 'totp_secret', label: 'Upstream TOTP setup secret (Base32, if enabled)', type: 'password', ac: 'off', optional: true }] },
+    credential_totp: { label: 'Complete two-factor authentication', fields: [
+      { name: 'totp_secret', label: 'Upstream TOTP setup secret (Base32, optional)', type: 'password', ac: 'off', optional: true },
+      { name: 'code', label: 'One-time code (not saved)', type: 'password', ac: 'one-time-code', optional: true }] },
     daily_approval: { label: 'Authorize agent access', fields: [] },
     login: { label: 'Sign in', fields: [
       { name: 'username', label: 'Username', type: 'text', ac: 'off' },
@@ -228,12 +231,14 @@
     const label = ctx.mode === 'custom' ? 'Additional information' : MODES[ctx.mode].label;
     const fixed = ctx.mode !== 'custom' && MODES[ctx.mode].fixedTitle;
     // A fixed step shows no text that came from the link: not even the site name, which an attacker could write a sentence into.
-    const managed = ['credential_setup', 'credential_replace', 'daily_approval'].includes(ctx.mode);
-    const grant = managed ? /^(https:\/\/[^\s]+) \| Grant: ([0-9.hmsµun]+)$/.exec(ctx.site) : null;
+    const managed = ['credential_setup', 'credential_replace', 'credential_totp', 'daily_approval'].includes(ctx.mode);
+    const grant = managed ? /^(https:\/\/[^\s]+)(?: \| Identity provider: (https:\/\/[^\s]+))? \| Grant: ([0-9.hmsµun]+)$/.exec(ctx.site) : null;
     if (managed && !grant) throw new Error('Missing or invalid authorization duration. Ask for a new login.');
     const siteLabel = grant ? grant[1] : ctx.site;
     $('d-duration-label').hidden = $('d-duration').hidden = !grant;
-    $('d-duration').textContent = grant ? grant[2] : '';
+    $('d-duration').textContent = grant ? grant[3] : '';
+    $('d-idp-label').hidden = $('d-idp').hidden = !(grant && grant[2]);
+    $('d-idp').textContent = grant && grant[2] ? grant[2] : '';
     document.title = fixed ? label : label + ' - ' + (siteLabel || 'Login');
     $('title').textContent = fixed ? label : label + ' - ' + (siteLabel || 'site');
     $('d-site').textContent = fixed ? 'The login vault (everything login keeps)' : (siteLabel || '(not given)');
@@ -251,7 +256,12 @@
       const note = document.createElement('p');
       note.textContent = ctx.mode === 'daily_approval'
         ? 'Approve access for the duration shown above using saved credentials. Update or forget them if needed. Reject does not create or extend a grant. To end an existing grant, close the session or forget the credentials.'
-        : 'Remembering credentials stores your username, password and authenticator setup secret in the encrypted vault after successful sign-in. Use the Base32 setup secret, not a six-digit code. The first grant lasts for the duration shown above.';
+        : 'Remembering credentials stores your username, password and any supplied authenticator setup secret in the encrypted vault after successful sign-in. If TOTP is enabled, use the Base32 setup secret, not a six-digit code. The first grant lasts for the duration shown above.';
+      box.append(note);
+    }
+    if (ctx.mode === 'credential_totp') {
+      const note = document.createElement('p');
+      note.textContent = 'Enter the TOTP setup secret to generate future codes automatically, or enter a one-time code instead. One-time codes are never saved; future logins may still need you to enter a fresh code.';
       box.append(note);
     }
     $('submit').textContent = ctx.mode === 'daily_approval' ? 'Approve' : (ctx.mode === 'credential_replace' ? 'Replace and authorize' : (ctx.mode === 'credential_setup' ? 'Sign in' : 'Submit'));
@@ -493,12 +503,16 @@
           continue;
         }
         const v = input.value;
-        if (v === '') {
+        if (v === '' && !f.optional) {
           say('Please fill in: ' + f.label + '.', 'bad');
           $('f-' + f.name).focus();
           return;
         }
-        fields[f.name] = v;
+        if (v !== '' || !f.optional) fields[f.name] = v;
+      }
+      if (ctx.mode === 'credential_totp' && (!!fields.totp_secret?.trim() === !!fields.code?.trim())) {
+        say('Enter either the setup secret or a one-time code, not both.', 'bad');
+        return;
       }
       if (ctx.factorDigits > 0 && !/^[0-9]+$/.test((($('f-seal-factor') || { value: '' }).value || '').trim())) {
         say('Type the ' + ctx.factorDigits + '-digit sealing code from your authenticator.', 'bad');

@@ -456,9 +456,16 @@ func TestACompressedBodyIsInflatedAndOneThatCannotBeIsLeftAsItIs(t *testing.T) {
 func TestAZipBombIsStoppedAtTheLimit(t *testing.T) {
 	s := fake(t)
 	s.AddTopic("bomb", 1)
-	s.Put("bomb", 0, rmqtest.Message{Body: bytes.Repeat([]byte("A"), 8<<20), Compressed: true})
+	// Compress in fixture setup, outside the timed network round trip. Under
+	// -race on a loaded CI runner the fake broker's compression can itself
+	// consume the entire timeout; the real test is bounded decompression.
+	body := rmqtest.Deflate(bytes.Repeat([]byte("A"), 8<<20))
+	s.Put("bomb", 0, rmqtest.Message{Body: body, Compressed: true, Precompressed: true})
 	c := New([]string{s.Addr}, Credentials{AccessKey: ak, SecretKey: sk}, Options{AllowLocal: true, Timeout: 3 * time.Second, Group: "securl-reader", MaxBody: 1 << 20})
-	r, _ := c.Route(context.Background(), "bomb")
+	r, err := c.Route(context.Background(), "bomb")
+	if err != nil {
+		t.Fatal(err)
+	}
 	res, err := c.Pull(context.Background(), r.Queues[0], 0, 1)
 	if err != nil {
 		t.Fatalf("%v", err)

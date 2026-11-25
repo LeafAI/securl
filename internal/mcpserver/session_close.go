@@ -417,7 +417,7 @@ func closeDetail(keys []string) string {
 		}
 	}
 	d := fmt.Sprintf("closes %d saved session(s), which forgets the login: %s.", len(names), strings.Join(names, ", "))
-	d += " For enrolled GitLab or Archery credentials, this also revokes the daily authorization; the encrypted credentials are retained."
+	d += " For enrolled website credentials, this also revokes the authorization; the encrypted credentials are retained."
 	if dbs > 0 {
 		d += fmt.Sprintf(" %d of them are database targets (db://): the account and password a person typed for a database is not kept anywhere else and cannot be recovered, it must be typed again.", dbs)
 	}

@@ -123,8 +123,8 @@ func (s *Server) ensureLoginMode(ctx context.Context, req *mcp.CallToolRequest, 
 			return nil, errf("unsupported_site", false, "%v", err)
 		}
 	}
-	if manage && (!remember.Supported(d.Name()) || !s.enrollmentAllowed(base)) {
-		return nil, errf("invalid_argument", false, "credential management requires GitLab or Archery over HTTPS with independently verified human delivery")
+	if manage && (!s.enrollmentAllowed(base, d)) {
+		return nil, errf("invalid_argument", false, "credential management requires a supported website over HTTPS with independently verified human delivery")
 	}
 	if !d.NeedsLogin() {
 		sess, err := d.Login(ctx, base, nil, s.hc)
@@ -136,7 +136,7 @@ func (s *Server) ensureLoginMode(ctx context.Context, req *mcp.CallToolRequest, 
 	}
 	if !force && !manage {
 		e, err := c.cache.Lookup(ctx, base, s.hc, 0)
-		if err == nil {
+		if err == nil && e.Site == d.Name() {
 			out := sessionOutput(e.Site, base, e.Session)
 			out.Cached = true
 			return &out, nil
@@ -161,7 +161,13 @@ func (s *Server) ensureLoginMode(ctx context.Context, req *mcp.CallToolRequest, 
 	if rd, ok := loginDriver.(rememberedDriver); ok {
 		rd.manage = manage
 		loginDriver = rd
-		detail = "For this exact site, sign in and optionally remember credentials, or authorize stored credentials for " + s.cfg.Security.AuthorizationTTL().String() + ". " + site.Key(base)
+		if detail != "" {
+			detail += " "
+		}
+		detail += "For this exact site, sign in and optionally remember credentials, or authorize stored credentials for " + s.cfg.Security.AuthorizationTTL().String() + ". " + site.Key(base)
+		if _, idp, _ := remember.Scope(d); idp != nil {
+			detail += ". Credentials belong to the configured identity provider " + site.Key(idp) + ". The authorization applies only to this destination."
+		}
 	}
 	f := c.mgr.StartDetailed(loginDriver, base, reason, detail, s.hc, func(f *flow.Flow, r flow.Result) {
 		var rj *flow.RejectedError
@@ -297,6 +303,10 @@ func classify(err error) *ToolError {
 		return errf("notify_failed", true, "%v", err)
 	case errors.Is(err, flow.ErrTunnel):
 		return errf("tunnel_unavailable", true, "%v", err)
+	case errors.Is(err, remember.ErrBindingChanged):
+		return errf("credential_configuration_changed", false, "%v; call session_open with manage_credentials=true", err)
+	case errors.Is(err, remember.ErrHumanChallenge):
+		return errf("human_challenge_required", true, "a fresh human challenge or TOTP setup is required; call session_open or use manage_credentials=true to update credentials")
 	case errors.Is(err, remember.ErrApprovalRequired):
 		return errf("session_expired", true, "human approval is required; call "+toolSessionOpen)
 	case errors.Is(err, remember.ErrRemoved):
@@ -335,6 +345,9 @@ func (s *Server) sites(_ context.Context, _ *mcp.CallToolRequest, _ Empty) (any,
 		} else if !ok {
 			info = SiteInfo{Name: n, Auth: "cookie", NeedsLogin: true, Rounds: []string{"login", "totp?"}, Match: "configured match_host", Source: "config"}
 		}
+		if d, err := site.Resolve(n, nil); err == nil {
+			info.RememberCredentials = remember.Supports(d)
+		}
 		out.Sites = append(out.Sites, info)
 	}
 	return out, nil
@@ -356,7 +369,7 @@ func (s *Server) sessions(_ context.Context, _ *mcp.CallToolRequest, _ Empty) (a
 		if !e.Session.ApprovalAt.IsZero() {
 			approvalExpiry = fmtTime(remember.Deadline(e.Session.ApprovalAt, e.Session.ApprovalDuration))
 			r, err := remember.Load(s.vault, e.Base)
-			valid := err == nil && r.Valid(time.Now()) && r.Revision == e.Session.ApprovalID
+			valid := err == nil && r.Valid(time.Now()) && r.Revision == e.Session.ApprovalID && r.Matches(e.Driver)
 			approvalValid = &valid
 		}
 		out.Sessions = append(out.Sessions, SessionInfo{AuthorizationExpiresAt: approvalExpiry, AuthorizationValid: approvalValid, Site: e.Site, BaseURL: e.Base, Auth: auth,

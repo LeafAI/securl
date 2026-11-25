@@ -92,6 +92,13 @@ type Driver interface {
 	Probe(ctx context.Context, base *url.URL, s *Session, hc *http.Client) error
 }
 
+// CredentialScope is implemented only by web drivers with supported reusable
+// login fields. A nonempty binding identifies the configured authentication
+// definition; an optional origin identifies a distinct identity provider.
+type CredentialScope interface {
+	RememberScope() (binding string, origin *url.URL)
+}
+
 // Configurable drivers accept per-site options from the `site_options:` config section.
 type Configurable interface {
 	Configure(opts map[string]string)
