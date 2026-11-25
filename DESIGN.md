@@ -578,7 +578,11 @@ Actions, deploying `web/` on each release tag). That is a repo setting for the o
 ## Remembered upstream credentials and daily grants
 
 The encrypted vault stores `credential/<site.Key(base)>` independently of `session/<site.Key(base)>` and
-securl's link/seal TOTP secrets. The record includes the driver, username, password, optional Base32-decoded TOTP seed,
+securl's link/seal TOTP secrets. Password storage and TOTP seed storage require separate explicit consent;
+the server rejects a submitted seed without the dedicated remember_totp choice, including submissions
+from older pages. A seed may be omitted while keeping the password; future upstream TOTP challenges then
+require fresh human codes. Successful replacement without renewed seed consent clears an old saved seed.
+The record includes the driver, username, password, optional Base32-decoded TOTP seed,
 a random revision, the UTC approval instant and the granted duration. Enrollment, removal and revocation invalidate previous revisions.
 Human consent is obtained using the existing sealed, one-shot browser flow in `credential_setup`, `credential_replace`, `credential_totp` or `daily_approval` mode. Enrollment is opt-in and the initial grant is committed only after successful upstream login. The
 authorization is committed using a cross-process compare-and-swap against the exact record that was offered.

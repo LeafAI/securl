@@ -129,7 +129,7 @@ right but the server could not open: a TOTP factor is on and its secret is missi
 ## 1. `session_open`
 
 Open a session on a website. May ask the human (DingTalk) for one or more rounds (e.g. the `login` step, then `totp`).
-The agent never sees the password. Enrolled websites ask for a `daily_approval` round and renew sessions during the fixed authorization grant (security.credential_authorization_ttl, default 24h). Enrollment takes place on the existing protected web page: the human selects Remember credentials and optionally enters the upstream TOTP setup secret. Password-only accounts do not need a seed. CAPTCHA and one-time codes without an enrolled seed require fresh human input and are never saved. Credentials are saved only after a successful login, which starts the first grant. The agent never supplies credentials.
+The agent never sees the password. Enrolled websites ask for a `daily_approval` round and renew sessions during the fixed authorization grant (security.credential_authorization_ttl, default 24h). Enrollment takes place on the existing protected web page: the human selects Remember credentials to save the password, and separately selects Remember TOTP (optional) if they want to save the upstream TOTP setup secret. Both choices default off. Password-only accounts do not need a seed. CAPTCHA and one-time codes without an enrolled seed require fresh human input and are never saved. Credentials are saved only after a successful login, which starts the first grant. The agent never supplies credentials.
 
 Input
 ```jsonc
