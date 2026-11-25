@@ -555,6 +555,27 @@ func (v *Vault) Get(key string) ([]byte, error) {
 	return out, err
 }
 
+// GetCurrent reads a record after strictly checking the current vault file.
+// Authorization checks must not fall back to memory if another process's
+// revocation could not be read, or if a known rollback is detected.
+func (v *Vault) GetCurrent(key string) ([]byte, error) {
+	var out []byte
+	err := v.open(func() error {
+		return v.withFileLock(func() error {
+			if err := v.syncLocked(); err != nil {
+				return err
+			}
+			b, ok := v.entries[key]
+			if !ok {
+				return ErrNoEntry
+			}
+			out = append([]byte(nil), b...)
+			return nil
+		})
+	})
+	return out, err
+}
+
 // Put stores a copy of value under key.
 func (v *Vault) Put(key string, value []byte) error {
 	return v.open(func() error {
@@ -570,6 +591,28 @@ func (v *Vault) Put(key string, value []byte) error {
 				} else {
 					delete(v.entries, key)
 				}
+				return err
+			}
+			wipe(prev)
+			return nil
+		})
+	})
+}
+
+// CompareAndSwap replaces a record only if its current bytes match the expected value.
+func (v *Vault) CompareAndSwap(key string, expected, value []byte) error {
+	return v.open(func() error {
+		return v.withFileLock(func() error {
+			if err := v.syncLocked(); err != nil {
+				return err
+			}
+			prev, ok := v.entries[key]
+			if !ok || !hmac.Equal(prev, expected) {
+				return errors.New("vault entry changed")
+			}
+			v.entries[key] = append([]byte(nil), value...)
+			if err := v.saveDataLocked(); err != nil {
+				v.entries[key] = prev
 				return err
 			}
 			wipe(prev)

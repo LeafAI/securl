@@ -19,6 +19,15 @@ const { chromium } = require('playwright');
 
   await page.goto(base + (fragment ? '#' + fragment : ''));
 
+  const fillField = async (k, v) => {
+    const selector = k === 'factor' ? '#f-seal-factor' : '#f-' + k;
+    if (k === 'remember') {
+      await page.locator(selector).setChecked(v === true || v === 'yes');
+    } else {
+      await page.fill(selector, v);
+    }
+  };
+
   if (action === 'inert') {
     // a file failed its integrity check: the page must not come to life
     await page.waitForTimeout(1200);
@@ -84,7 +93,7 @@ const { chromium } = require('playwright');
     await page.check('#verified');
     for (const [k, val] of Object.entries(v)) {
       if (k === 'unlock') continue;
-      await page.fill(k === 'factor' ? '#f-seal-factor' : '#f-' + k, val);
+      await fillField(k, val);
     }
     await page.click('#submit');
     await page.waitForFunction(() => {
@@ -172,8 +181,12 @@ const { chromium } = require('playwright');
   if (action === 'submit') {
     await page.check('#verified');
     const vals = JSON.parse(values);
-    for (const [k, v] of Object.entries(vals)) await page.fill(k === 'factor' ? '#f-seal-factor' : '#f-' + k, v);
+    for (const [k, v] of Object.entries(vals)) await fillField(k, v);
     await page.click('#submit');
+  } else if (action === 'replace' || action === 'forget') {
+    await page.check('#verified');
+    if (action === 'forget') page.once('dialog', d => d.accept());
+    await page.click(action === 'replace' ? '#replace-credentials' : '#forget-credentials');
   } else if (action === 'reject') {
     await page.click('#reject');
     if (reason) await page.fill('#reason', reason);

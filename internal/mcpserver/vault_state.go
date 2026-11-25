@@ -66,8 +66,9 @@ func (s *Server) openCore() error {
 		s.audit.Record(audit.Event{Event: "session_dropped", Host: key, Result: reason})
 	}
 	c.mgr = flow.NewManager(flow.Config{
-		Keys:     c.keys,
-		Notifier: s.notify, Origin: s.origin, LinkViaAgent: s.linkViaAgent(), Tunnels: s.tunnels, PageURL: s.cfg.Web.PageURL, TTL: s.cfg.Web.TTL, Log: s.log,
+		AuthorizationTTL: s.cfg.Security.AuthorizationTTL(),
+		Keys:             c.keys,
+		Notifier:         s.notify, Origin: s.origin, LinkViaAgent: s.linkViaAgent(), Tunnels: s.tunnels, PageURL: s.cfg.Web.PageURL, TTL: s.cfg.Web.TTL, Log: s.log,
 		Admit: s.admit, OnRound: s.onRound, OnTunnel: s.onTunnel, Unlock: unlock, Seal: sealing,
 	})
 	c.closer = newCloser(s, c, unlock, sealing)

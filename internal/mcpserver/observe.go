@@ -15,6 +15,10 @@ import (
 
 // admit decides whether a new login flow may bother a human, and audits the decision.
 func (s *Server) admit(d site.Driver, base *url.URL, reason string) error {
+	if _, ok := d.(rememberedDriver); ok {
+		// The wrapper admits the actual human round immediately before asking.
+		return nil
+	}
 	if lim := s.limiter.Allow(session.Key(base)); lim != nil {
 		s.audit.Record(audit.Event{Event: "rate_limited", Site: d.Name(), Host: base.Host, Reason: reason, Result: lim.Reason})
 		return lim

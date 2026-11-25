@@ -28,12 +28,13 @@ func errf(code string, retryable bool, format string, a ...any) *ToolError {
 }
 
 type LoginInput struct {
-	URL             string `json:"url" jsonschema:"Any URL on the site; scheme+host identify the site."`
-	Site            string `json:"site,omitempty" jsonschema:"Driver name (see site_list). Auto-detected from the URL when omitted."`
-	Reason          string `json:"reason,omitempty" jsonschema:"Why the agent needs access; shown to the human in DingTalk."`
-	ForceRefresh    bool   `json:"force_refresh,omitempty" jsonschema:"Skip the cached session and log in again."`
-	Wait            *bool  `json:"wait,omitempty" jsonschema:"false: return pending immediately after notifying the human. Default true."`
-	MaxBlockSeconds int    `json:"max_block_seconds,omitempty" jsonschema:"Override the default blocking time (1-600)."`
+	ManageCredentials bool   `json:"manage_credentials,omitempty" jsonschema:"Ask the human to manage remembered GitLab or Archery credentials on the protected page, even when the current session is valid. No credentials are accepted in tool arguments."`
+	URL               string `json:"url" jsonschema:"Any URL on the site; scheme+host identify the site."`
+	Site              string `json:"site,omitempty" jsonschema:"Driver name (see site_list). Auto-detected from the URL when omitted."`
+	Reason            string `json:"reason,omitempty" jsonschema:"Why the agent needs access; shown to the human in DingTalk."`
+	ForceRefresh      bool   `json:"force_refresh,omitempty" jsonschema:"Skip the cached session and log in again."`
+	Wait              *bool  `json:"wait,omitempty" jsonschema:"false: return pending immediately after notifying the human. Default true."`
+	MaxBlockSeconds   int    `json:"max_block_seconds,omitempty" jsonschema:"Override the default blocking time (1-600)."`
 }
 
 type LoginWaitInput struct {
@@ -45,16 +46,17 @@ type LoginWaitInput struct {
 // carries nothing that could be used to act as the person. The credentials stay in the vault and are used by the request
 // tool, which puts them into each request and removes them from the answer.
 type LoginOutput struct {
-	Status     string `json:"status"` // ok | pending
-	Site       string `json:"site,omitempty"`
-	BaseURL    string `json:"base_url,omitempty"`
-	Auth       string `json:"auth,omitempty"` // cookie | bearer | none: how the site authenticates, not with what
-	Cached     bool   `json:"cached,omitempty"`
-	ExpiresAt  string `json:"expires_at,omitempty"`
-	LoginID    string `json:"login_id,omitempty"`
-	WaitingFor string `json:"waiting_for,omitempty"`
-	Round      int    `json:"round,omitempty"`
-	NextTool   string `json:"next_tool,omitempty"`
+	AuthorizationExpiresAt string `json:"authorization_expires_at,omitempty"`
+	Status                 string `json:"status"` // ok | pending
+	Site                   string `json:"site,omitempty"`
+	BaseURL                string `json:"base_url,omitempty"`
+	Auth                   string `json:"auth,omitempty"` // cookie | bearer | none: how the site authenticates, not with what
+	Cached                 bool   `json:"cached,omitempty"`
+	ExpiresAt              string `json:"expires_at,omitempty"`
+	LoginID                string `json:"login_id,omitempty"`
+	WaitingFor             string `json:"waiting_for,omitempty"`
+	Round                  int    `json:"round,omitempty"`
+	NextTool               string `json:"next_tool,omitempty"`
 	LinkHandover
 }
 
@@ -139,12 +141,14 @@ type SitesOutput struct {
 }
 
 type SessionInfo struct {
-	Site            string `json:"site"`
-	BaseURL         string `json:"base_url"`
-	Auth            string `json:"auth"`
-	ObtainedAt      string `json:"obtained_at"`
-	ExpiresAt       string `json:"expires_at,omitempty"`
-	LastValidatedAt string `json:"last_validated_at"`
+	AuthorizationValid     *bool  `json:"authorization_valid,omitempty"`
+	AuthorizationExpiresAt string `json:"authorization_expires_at,omitempty"`
+	Site                   string `json:"site"`
+	BaseURL                string `json:"base_url"`
+	Auth                   string `json:"auth"`
+	ObtainedAt             string `json:"obtained_at"`
+	ExpiresAt              string `json:"expires_at,omitempty"`
+	LastValidatedAt        string `json:"last_validated_at"`
 }
 
 type SessionsOutput struct {

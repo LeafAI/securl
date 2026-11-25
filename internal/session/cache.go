@@ -11,7 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/LeafAI/securl/internal/remember"
 	"github.com/LeafAI/securl/internal/site"
+	"github.com/LeafAI/securl/internal/vault"
 )
 
 type Entry struct {
@@ -104,6 +106,9 @@ func (c *Cache) Lookup(ctx context.Context, u *url.URL, hc *http.Client, fresh t
 	if e == nil {
 		return nil, ErrNoSession
 	}
+	if err := c.authorized(k, e); err != nil {
+		return nil, err
+	}
 	if !e.Session.ExpiresAt.IsZero() && time.Now().After(e.Session.ExpiresAt) {
 		c.drop(k, DropExpired)
 		return nil, ErrExpired
@@ -125,7 +130,25 @@ func (c *Cache) Lookup(ctx context.Context, u *url.URL, hc *http.Client, fresh t
 	c.mu.Lock()
 	e.ValidatedAt = time.Now()
 	c.mu.Unlock()
+	if err := c.authorized(k, e); err != nil {
+		return nil, err
+	}
 	return e, nil
+}
+
+// authorized binds cookies to the current persisted authorization, including across daemon processes.
+func (c *Cache) authorized(key string, e *Entry) error {
+	if c.store == nil || (!remember.Supported(e.Site) && e.Session.ApprovalID == "" && c.store.v.State() != vault.Unlocked) {
+		return nil
+	}
+	r, err := remember.Load(c.store.v, key)
+	if errors.Is(err, vault.ErrNoEntry) && e.Session.ApprovalID == "" {
+		return nil
+	}
+	if err != nil || !r.Valid(time.Now()) || r.Site != e.Site || r.Revision != e.Session.ApprovalID || !r.ApprovedAt.Equal(e.Session.ApprovalAt) || r.Duration != e.Session.ApprovalDuration {
+		return ErrExpired
+	}
+	return nil
 }
 
 // cannotTell reports whether a probe failed without learning anything about the session. Credentials that were refused are
@@ -143,7 +166,7 @@ func (c *Cache) Peek(key string) (*Entry, bool) {
 	if e == nil {
 		e = c.fromStore(key)
 	}
-	if e == nil {
+	if e == nil || c.authorized(key, e) != nil {
 		return nil, false
 	}
 	cp := *e
@@ -203,6 +226,10 @@ func (c *Cache) Update(u *url.URL, s *site.Session) bool {
 	}
 	c.mu.Lock()
 	ne := *old // a copy: a reader that already holds the old entry keeps a consistent view
+	if old.Session.ApprovalID != s.ApprovalID || c.authorized(k, old) != nil {
+		c.mu.Unlock()
+		return false
+	}
 	ne.Session = s
 	c.m[k] = &ne
 	c.mu.Unlock()

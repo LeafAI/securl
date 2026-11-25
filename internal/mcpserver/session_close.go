@@ -20,6 +20,7 @@ import (
 	"github.com/LeafAI/securl/internal/keyring"
 	"github.com/LeafAI/securl/internal/ratelimit"
 	"github.com/LeafAI/securl/internal/redissite"
+	"github.com/LeafAI/securl/internal/remember"
 	"github.com/LeafAI/securl/internal/rocketmqsite"
 	"github.com/LeafAI/securl/internal/session"
 	"github.com/LeafAI/securl/internal/site"
@@ -53,6 +54,7 @@ const closeLimitKey = "securl://session-close"
 // closeReq is one request to close sessions. Its keys are frozen when it is made: what the person agreed to is that list, not
 // "whatever exists when they answer".
 type closeReq struct {
+	err     error
 	scope   string
 	keys    []string
 	made    time.Time
@@ -121,7 +123,16 @@ func (s *Server) scopeOf(c *core, in LogoutInput) (closeScope, *ToolError) {
 		return closeScope{}, errf("invalid_argument", false, "give exactly one of url or all")
 	}
 	if in.All {
-		return closeScope{scope: scopeAll, keys: c.cache.Keys()}, nil
+		keys := c.cache.Keys()
+		for _, name := range s.vault.Keys(remember.Prefix) {
+			key := strings.TrimPrefix(name, remember.Prefix)
+			if r, err := remember.Load(s.vault, key); err == nil && (r.Valid(time.Now()) || runningRemembered(c, key)) {
+				keys = append(keys, key)
+			}
+		}
+		sort.Strings(keys)
+		keys = compactKeys(keys)
+		return closeScope{scope: scopeAll, keys: keys}, nil
 	}
 	var base *url.URL
 	if strings.HasPrefix(strings.ToLower(in.URL), dbsite.Scheme+":") {
@@ -174,7 +185,17 @@ func (s *Server) scopeOf(c *core, in LogoutInput) (closeScope, *ToolError) {
 			keys = []string{k}
 		}
 	}
+	if len(keys) == 0 {
+		if r, err := remember.Load(s.vault, key); err == nil && (r.Valid(time.Now()) || runningRemembered(c, key)) {
+			keys = []string{key}
+		}
+	}
 	return closeScope{scope: key, keys: keys, base: base}, nil
+}
+
+func runningRemembered(c *core, key string) bool {
+	base, err := url.Parse(key)
+	return err == nil && c.mgr.Running(base) != nil
 }
 
 // logout closes saved sessions, once a person has confirmed it. A request that has nothing saved to close needs nobody's
@@ -270,6 +291,18 @@ func (cl *closer) finish(r *closeReq, sc closeScope, res flow.Result) {
 	var rj *flow.RejectedError
 	switch {
 	case res.Err == nil:
+		for _, key := range r.keys {
+			if _, err := remember.Load(cl.s.vault, key); err != nil {
+				continue
+			}
+			cl.c.mgr.CancelBase(key)
+			if err := remember.Revoke(cl.s.vault, key); err != nil {
+				cl.s.audit.Record(audit.Event{Event: "credential_revoke_failed", Host: key})
+				r.err = errors.New("could not revoke one or more saved authorizations; retry session_close")
+				continue
+			}
+			cl.s.audit.Record(audit.Event{Event: "credential_revoked", Host: key})
+		}
 		r.removed = cl.c.cache.RemoveKeys(r.keys)
 		if sc.base != nil {
 			r.removed += cancelPending(cl.c, sc)
@@ -343,6 +376,16 @@ func closeLabel(keys []string) string {
 	return label
 }
 
+func compactKeys(keys []string) []string {
+	out := keys[:0]
+	for _, key := range keys {
+		if len(out) == 0 || out[len(out)-1] != key {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
 func sortedNames(keys []string) []string {
 	out := make([]string, 0, len(keys))
 	for _, k := range keys {
@@ -374,6 +417,7 @@ func closeDetail(keys []string) string {
 		}
 	}
 	d := fmt.Sprintf("closes %d saved session(s), which forgets the login: %s.", len(names), strings.Join(names, ", "))
+	d += " For enrolled GitLab or Archery credentials, this also revokes the daily authorization; the encrypted credentials are retained."
 	if dbs > 0 {
 		d += fmt.Sprintf(" %d of them are database targets (db://): the account and password a person typed for a database is not kept anywhere else and cannot be recovered, it must be typed again.", dbs)
 	}
@@ -443,6 +487,9 @@ func (s *Server) awaitClose(ctx context.Context, mreq *mcp.CallToolRequest, r *c
 				return nil, closeErr(err)
 			}
 			<-r.done
+			if r.err != nil {
+				return nil, closeErr(r.err)
+			}
 			return LogoutOutput{Status: "closed", Removed: r.removed}, nil
 		case <-timer.C:
 			return closePending(r, f.Snapshot()), nil

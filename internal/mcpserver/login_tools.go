@@ -19,6 +19,7 @@ import (
 	"github.com/LeafAI/securl/internal/notify"
 	"github.com/LeafAI/securl/internal/ratelimit"
 	"github.com/LeafAI/securl/internal/redissite"
+	"github.com/LeafAI/securl/internal/remember"
 	"github.com/LeafAI/securl/internal/rocketmqsite"
 	"github.com/LeafAI/securl/internal/session"
 	"github.com/LeafAI/securl/internal/site"
@@ -39,7 +40,7 @@ func (s *Server) login(ctx context.Context, req *mcp.CallToolRequest, in LoginIn
 		in.Reason = in.Reason[:200]
 	}
 	wait := in.Wait == nil || *in.Wait
-	out, terr := s.ensureLogin(ctx, req, in.URL, in.Site, in.Reason, in.ForceRefresh, wait, s.maxBlock(in.MaxBlockSeconds))
+	out, terr := s.ensureLoginMode(ctx, req, in.URL, in.Site, in.Reason, in.ForceRefresh, wait, s.maxBlock(in.MaxBlockSeconds), in.ManageCredentials)
 	if terr != nil {
 		return nil, terr
 	}
@@ -64,6 +65,10 @@ func (s *Server) loginWait(ctx context.Context, req *mcp.CallToolRequest, in Log
 
 // ensureLogin returns a valid session for the site: from cache, or by running a login flow.
 func (s *Server) ensureLogin(ctx context.Context, req *mcp.CallToolRequest, raw, siteName, reason string, force, wait bool, max time.Duration) (*LoginOutput, *ToolError) {
+	return s.ensureLoginMode(ctx, req, raw, siteName, reason, force, wait, max, false)
+}
+
+func (s *Server) ensureLoginMode(ctx context.Context, req *mcp.CallToolRequest, raw, siteName, reason string, force, wait bool, max time.Duration, manage bool) (*LoginOutput, *ToolError) {
 	c, terr := s.gate()
 	if terr != nil {
 		return nil, terr
@@ -118,6 +123,9 @@ func (s *Server) ensureLogin(ctx context.Context, req *mcp.CallToolRequest, raw,
 			return nil, errf("unsupported_site", false, "%v", err)
 		}
 	}
+	if manage && (!remember.Supported(d.Name()) || !s.enrollmentAllowed(base)) {
+		return nil, errf("invalid_argument", false, "credential management requires GitLab or Archery over HTTPS with independently verified human delivery")
+	}
 	if !d.NeedsLogin() {
 		sess, err := d.Login(ctx, base, nil, s.hc)
 		if err != nil {
@@ -126,7 +134,7 @@ func (s *Server) ensureLogin(ctx context.Context, req *mcp.CallToolRequest, raw,
 		out := sessionOutput(d.Name(), base, sess)
 		return &out, nil
 	}
-	if !force {
+	if !force && !manage {
 		e, err := c.cache.Lookup(ctx, base, s.hc, 0)
 		if err == nil {
 			out := sessionOutput(e.Site, base, e.Session)
@@ -146,11 +154,22 @@ func (s *Server) ensureLogin(ctx context.Context, req *mcp.CallToolRequest, raw,
 	if dt, ok := d.(site.Detailer); ok {
 		detail = dt.Detail(base)
 	}
-	f := c.mgr.StartDetailed(d, base, reason, detail, s.hc, func(f *flow.Flow, r flow.Result) {
+	loginDriver, err := s.remembered(base, d, c.cache, reason)
+	if err != nil {
+		return nil, classify(err)
+	}
+	if rd, ok := loginDriver.(rememberedDriver); ok {
+		rd.manage = manage
+		loginDriver = rd
+		detail = "For this exact site, sign in and optionally remember credentials, or authorize stored credentials for " + s.cfg.Security.AuthorizationTTL().String() + ". " + site.Key(base)
+	}
+	f := c.mgr.StartDetailed(loginDriver, base, reason, detail, s.hc, func(f *flow.Flow, r flow.Result) {
 		var rj *flow.RejectedError
 		switch {
 		case r.Err == nil:
-			c.cache.Put(f.Base, d, r.Session)
+			if _, ok := loginDriver.(rememberedDriver); !ok {
+				c.cache.Put(f.Base, d, r.Session)
+			}
 		case errors.As(r.Err, &rj):
 			s.limiter.Rejected(session.Key(f.Base))
 		}
@@ -243,6 +262,9 @@ func handover(sn flow.Snapshot, what string, origin notify.Origin) LinkHandover 
 // sessionOutput describes a session without any of its credentials.
 func sessionOutput(name string, base *url.URL, sess *site.Session) LoginOutput {
 	out := LoginOutput{Status: "ok", Site: name, BaseURL: base.String(), ExpiresAt: fmtTime(sess.ExpiresAt)}
+	if !sess.ApprovalAt.IsZero() {
+		out.AuthorizationExpiresAt = fmtTime(remember.Deadline(sess.ApprovalAt, sess.ApprovalDuration))
+	}
 	switch {
 	case sess.Headers["Authorization"] != "":
 		out.Auth = "bearer"
@@ -275,6 +297,10 @@ func classify(err error) *ToolError {
 		return errf("notify_failed", true, "%v", err)
 	case errors.Is(err, flow.ErrTunnel):
 		return errf("tunnel_unavailable", true, "%v", err)
+	case errors.Is(err, remember.ErrApprovalRequired):
+		return errf("session_expired", true, "human approval is required; call "+toolSessionOpen)
+	case errors.Is(err, remember.ErrRemoved):
+		return errf("no_session", false, "%v", err)
 	case errors.Is(err, site.ErrBadCredentials):
 		return errf("bad_credentials", true, "%v", err)
 	case errors.Is(err, site.ErrLoginRejected):
@@ -325,7 +351,15 @@ func (s *Server) sessions(_ context.Context, _ *mcp.CallToolRequest, _ Empty) (a
 		if e.Session.Headers["Authorization"] != "" {
 			auth = "bearer"
 		}
-		out.Sessions = append(out.Sessions, SessionInfo{Site: e.Site, BaseURL: e.Base, Auth: auth,
+		var approvalExpiry string
+		var approvalValid *bool
+		if !e.Session.ApprovalAt.IsZero() {
+			approvalExpiry = fmtTime(remember.Deadline(e.Session.ApprovalAt, e.Session.ApprovalDuration))
+			r, err := remember.Load(s.vault, e.Base)
+			valid := err == nil && r.Valid(time.Now()) && r.Revision == e.Session.ApprovalID
+			approvalValid = &valid
+		}
+		out.Sessions = append(out.Sessions, SessionInfo{AuthorizationExpiresAt: approvalExpiry, AuthorizationValid: approvalValid, Site: e.Site, BaseURL: e.Base, Auth: auth,
 			ObtainedAt: fmtTime(e.ObtainedAt), ExpiresAt: fmtTime(e.Session.ExpiresAt), LastValidatedAt: fmtTime(e.ValidatedAt)})
 	}
 	return out, nil

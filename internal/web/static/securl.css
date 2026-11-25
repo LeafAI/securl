@@ -28,3 +28,6 @@ button[disabled] { opacity:.5; cursor:not-allowed; }
 img.captcha { display:block; max-width:100%; height:auto; margin:.5rem 0; border:1px solid var(--line); border-radius:.4rem; background:#fff; }
 .foot { margin-top:2rem; font-size:.75rem; color:var(--muted); }
 [hidden] { display:none !important; }
+
+#fields input[type=checkbox] { width:auto; margin:.35rem 0; }
+#fields p { font-size:.9rem; color:var(--muted); }

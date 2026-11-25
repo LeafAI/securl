@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/LeafAI/securl/internal/remember"
 	"github.com/LeafAI/securl/internal/session"
 	"github.com/LeafAI/securl/internal/site"
 	"github.com/LeafAI/securl/internal/site/archery"
@@ -41,7 +42,7 @@ func (s *Server) archeryClient(ctx context.Context, req *mcp.CallToolRequest, u 
 	if !ok {
 		return nil, nil, errf("internal", true, "session vanished right after login; retry")
 	}
-	return &archery.Client{Base: base, Sess: e.Session, HC: s.hc}, nil, nil
+	return &archery.Client{Base: base, Sess: e.Session, HC: s.grantClient(s.hc, base, e.Session.ApprovalID)}, nil, nil
 }
 
 func archeryErr(err error) *ToolError {
@@ -54,7 +55,7 @@ func archeryErr(err error) *ToolError {
 		e := errf("sql_check_failed", false, "%v", err)
 		e.Hint = "Fix the SQL and call archery_run_sql again."
 		return e
-	case errors.Is(err, archery.ErrSessionInvalid):
+	case errors.Is(err, remember.ErrApprovalRequired), errors.Is(err, archery.ErrSessionInvalid):
 		e := errf("session_expired", true, "%v", err)
 		e.Hint = archerySessionHint
 		return e

@@ -44,6 +44,7 @@
     </div>
     <dl>
       <dt>Site</dt><dd id="d-site"></dd>
+      <dt id="d-duration-label" hidden>Access duration</dt><dd id="d-duration" hidden></dd>
       <dt>Step</dt><dd id="d-mode"></dd>
       <dt>Tunnel host</dt><dd id="d-host"></dd>
       <dt>Key fingerprint</dt><dd id="d-fpr"></dd>
@@ -57,6 +58,8 @@
       <div class="row">
         <button class="primary" id="submit" type="submit" disabled>Submit</button>
         <button id="reject" type="button">Reject</button>
+        <button id="replace-credentials" type="button" hidden disabled>Update credentials</button>
+        <button id="forget-credentials" type="button" hidden disabled>Forget credentials</button>
         <button id="reject-cancel" type="button" hidden>Back</button>
       </div>
     </form>

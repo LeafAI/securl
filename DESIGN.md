@@ -565,3 +565,25 @@ MCP registration: `claude mcp add login -- login`.
 
 Still open: publishing the static page needs GitHub Pages enabled for the repo (source: GitHub
 Actions, deploying `web/` on each release tag). That is a repo setting for the owner.
+
+
+## Remembered upstream credentials and daily grants
+
+The encrypted vault stores `credential/<site.Key(base)>` independently of `session/<site.Key(base)>` and
+securl's link/seal TOTP secrets. The record includes the driver, username, password, Base32-decoded TOTP seed,
+a random revision, the UTC approval instant and the granted duration. Enrollment, removal and revocation invalidate previous revisions.
+Human consent is obtained using the existing sealed, one-shot browser flow in `credential_setup`, `credential_replace` or `daily_approval` mode. Enrollment is opt-in and the initial grant is committed only after successful upstream login. The
+authorization is committed using a cross-process compare-and-swap against the exact record that was offered.
+Its fixed lifetime (security.credential_authorization_ttl, default 24h) is not extended by upstream login, probing, cookie rotation or requests. The duration displayed in the consent page is bound into the existing sealed round. Configuration changes affect subsequent grants only.
+
+Sessions carry the revision and approval instant internally. Cache reuse requires the current vault grant;
+outbound session requests check the grant again, including Archery workflow polling. A fresh login generates
+RFC 6238 SHA-1, six-digit, 30-second codes only when the upstream driver asks. Stored credentials are restricted
+to the enrolled HTTPS origin and driver. Unenrolled sites may continue to use the legacy flow without remembering anything. The human enrolls secrets
+on the existing protected web page; no MCP input or response contains them. A removal tombstone
+prevents legacy fallback to stale cookies in other processes. Confirmed session closing revokes the grant without
+deleting the stored credential. In-flight network requests cannot be recalled.
+
+The same-user processes that can modify the host or securl binary remain outside this trust boundary. Holding
+the upstream password and TOTP seed together increases the impact of vault compromise. An agent-delivered approval
+link without a separately held securl factor is refused, since possession of the link alone is not human consent.

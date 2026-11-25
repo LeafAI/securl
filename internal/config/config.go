@@ -84,7 +84,12 @@ type Sessions struct {
 	Dir string `yaml:"dir"`
 }
 
+const DefaultCredentialAuthorizationTTL = 24 * time.Hour
+
 type Security struct {
+	// CredentialAuthorizationTTL is the fixed lifetime of each new remembered-credential grant.
+	CredentialAuthorizationTTL time.Duration `yaml:"credential_authorization_ttl"`
+
 	// AllowedHosts, when non-empty, restricts which sites the agent may log in to. Entries are
 	// glob patterns matched against "host" and "host:port", e.g. "*.corp.example".
 	AllowedHosts []string `yaml:"allowed_hosts"`
@@ -122,7 +127,18 @@ type TOTP struct {
 func (t TOTP) On() bool { return t.Enabled }
 
 // Validate checks both factors.
+func (s Security) AuthorizationTTL() time.Duration {
+	if s.CredentialAuthorizationTTL == 0 {
+		return DefaultCredentialAuthorizationTTL
+	}
+	return s.CredentialAuthorizationTTL
+}
+
 func (s Security) Validate() error {
+	if s.CredentialAuthorizationTTL < 0 {
+		return fmt.Errorf("security.credential_authorization_ttl must be positive")
+	}
+
 	for name, t := range map[string]TOTP{"link_totp": s.LinkTOTP, "seal_totp": s.SealTOTP} {
 		if !t.Enabled {
 			continue
@@ -386,6 +402,9 @@ func (c *Config) applyDefaults(dir string) {
 		c.Web.TTL = 10 * time.Minute
 	}
 	c.Databases = applyDatabaseDefaults(c.Databases)
+	if c.Security.CredentialAuthorizationTTL == 0 {
+		c.Security.CredentialAuthorizationTTL = DefaultCredentialAuthorizationTTL
+	}
 	c.Security.LinkTOTP.applyDefaults(10*time.Minute, filepath.Join(dir, "totp", "link.secret"))
 	c.Security.SealTOTP.applyDefaults(30*time.Second, filepath.Join(dir, "totp", "seal.secret"))
 	if c.Audit.File == "" {
