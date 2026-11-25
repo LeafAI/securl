@@ -55,13 +55,40 @@ type setupAsker struct {
 	approvedAt time.Time
 }
 
+// rememberedTOTP requires separate, explicit consent to retain an upstream
+// authenticator seed. Missing consent (including an older page) never saves it.
+func rememberedTOTP(values site.Credentials, credentialsConsent bool) ([]byte, error) {
+	flag := values["remember_totp"]
+	seedText := strings.TrimSpace(values["totp_secret"])
+	if flag != "" && flag != "yes" && flag != "no" {
+		return nil, errors.New("invalid Remember TOTP choice")
+	}
+	if flag != "yes" {
+		if seedText != "" {
+			return nil, errors.New("TOTP setup secret requires explicit Remember TOTP consent; use the updated authentication page")
+		}
+		return nil, nil
+	}
+	if !credentialsConsent {
+		return nil, errors.New("Remember TOTP requires Remember credentials")
+	}
+	if seedText == "" {
+		return nil, errors.New("enter the Base32 TOTP setup secret")
+	}
+	seed, err := totp.ParseSecret(seedText)
+	if err != nil {
+		return nil, errors.New("invalid Base32 TOTP setup secret")
+	}
+	return seed, nil
+}
+
 func (a *setupAsker) Ask(ctx context.Context, mode string, fields []site.Field) (site.Credentials, error) {
 	if login, challenge := remember.LoginChallenge(mode, fields); login {
 		if a.gotLogin {
 			return nil, errors.New("unexpected repeated login challenge")
 		}
 		a.gotLogin = true
-		values, err := a.human.Ask(ctx, a.mode, []site.Field{{Name: "username"}, {Name: "password", Secret: true}, {Name: "remember"}, {Name: "totp_secret", Secret: true}})
+		values, err := a.human.Ask(ctx, a.mode, []site.Field{{Name: "username"}, {Name: "password", Secret: true}, {Name: "remember"}, {Name: "remember_totp"}, {Name: "totp_secret", Secret: true}})
 		if err != nil {
 			return nil, err
 		}
@@ -69,18 +96,13 @@ func (a *setupAsker) Ask(ctx context.Context, mode string, fields []site.Field) 
 			return nil, site.ErrBadCredentials
 		}
 		a.consent = a.mode == "credential_replace" || values["remember"] == "yes"
-		if !a.consent && values["totp_secret"] != "" {
-			return nil, errors.New("unexpected setup secret without consent")
+		seed, err := rememberedTOTP(values, a.consent)
+		if err != nil {
+			return nil, err
 		}
 		a.record.Username, a.record.Password = values["username"], values["password"]
 		a.approvedAt = time.Now()
-		if a.consent && strings.TrimSpace(values["totp_secret"]) != "" {
-			seed, err := totp.ParseSecret(values["totp_secret"])
-			if err != nil {
-				return nil, errors.New("invalid Base32 TOTP setup secret")
-			}
-			a.record.Secret = seed
-		}
+		a.record.Secret = seed
 		out := site.Credentials{"username": a.record.Username, "password": a.record.Password}
 		if len(challenge) > 0 {
 			answer, err := a.human.Ask(ctx, "custom", challenge)
@@ -96,20 +118,21 @@ func (a *setupAsker) Ask(ctx context.Context, mode string, fields []site.Field) 
 			return a.human.Ask(ctx, mode, fields)
 		}
 		if len(a.record.Secret) == 0 {
-			values, err := a.human.Ask(ctx, "credential_totp", []site.Field{{Name: "totp_secret", Secret: true}, {Name: "code", Secret: true}})
+			values, err := a.human.Ask(ctx, "credential_totp", []site.Field{{Name: "remember_totp"}, {Name: "totp_secret", Secret: true}, {Name: "code", Secret: true}})
 			if err != nil {
 				return nil, err
 			}
-			seedText, code := strings.TrimSpace(values["totp_secret"]), strings.TrimSpace(values["code"])
-			if seedText == "" && code != "" {
+			seed, err := rememberedTOTP(values, a.consent)
+			if err != nil {
+				return nil, err
+			}
+			code := strings.TrimSpace(values["code"])
+			if len(seed) == 0 && code != "" {
 				return site.Credentials{"code": code}, nil
 			}
-			if seedText == "" || code != "" {
+			if len(seed) == 0 || code != "" {
+				clear(seed)
 				return nil, errors.New("enter either the TOTP setup secret or a one-time code")
-			}
-			seed, err := totp.ParseSecret(seedText)
-			if err != nil {
-				return nil, errors.New("invalid Base32 TOTP setup secret")
 			}
 			a.record.Secret = seed
 		}

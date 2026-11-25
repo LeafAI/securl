@@ -163,50 +163,82 @@ func TestRememberedAdditionalWebsites(t *testing.T) {
 // A site that requires TOTP after password submission asks for the seed in a
 // second protected page if it wasn't supplied during initial enrollment.
 func TestRememberedOptionalTOTPSetup(t *testing.T) {
-	seed := []byte("12345678901234567890")
-	fake := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/internal/security/login" {
-			http.NotFound(w, r)
-			return
-		}
-		var in struct{ Params map[string]string }
-		json.NewDecoder(r.Body).Decode(&in)
-		code := in.Params["otp"]
-		now := time.Now()
-		if in.Params["username"] != "alice" || in.Params["password"] != "pw" || (code != totp.Code(seed, now, 30*time.Second, 6) && code != totp.Code(seed, now.Add(-30*time.Second), 30*time.Second, 6)) {
-			http.Error(w, "otp required", 401)
-			return
-		}
-		http.SetCookie(w, &http.Cookie{Name: "sid", Value: "test-session-token", Path: "/", Secure: true})
-		fmt.Fprint(w, `{}`)
-	}))
-	defer fake.Close()
-	var dir string
-	e := setupWithClient(t, fake.Client(), func(c *config.Config) { dir = c.Vault.Dir })
-	v := vault.New(dir)
-	if err := v.Unlock("correct horse battery staple"); err != nil {
-		t.Fatal(err)
-	}
-	out, bad := e.call(t, "session_open", map[string]any{"url": fake.URL, "site": "kibana"})
-	if bad || out["waiting_for"] != "credential_setup" {
-		t.Fatal(out)
-	}
-	human(t, e.rec.wait(t, 1), e.dir, "submit", `{"username":"alice","password":"pw","remember":"yes"}`, "")
-	if _, err := remember.Load(v, fake.URL); !errors.Is(err, vault.ErrNoEntry) {
-		t.Fatal("credentials persisted before validation", err)
-	}
-	msg := e.rec.wait(t, 2)
-	if !strings.Contains(msg, "TOTP setup secret") {
-		t.Fatal("missing seed round", msg)
-	}
-	human(t, msg, e.dir, "submit", `{"totp_secret":"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"}`, "")
-	out, bad = e.call(t, "session_wait", map[string]any{"login_id": out["login_id"], "max_block_seconds": 20})
-	if bad || out["status"] != "ok" {
-		t.Fatal(out)
-	}
-	rec, err := remember.Load(v, fake.URL)
-	if err != nil || string(rec.Secret) != string(seed) {
-		t.Fatal("seed was not persisted", err)
+	for _, rememberSeed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("remember_totp_%t", rememberSeed), func(t *testing.T) {
+			seed := []byte("12345678901234567890")
+			fake := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/internal/security/login" {
+					http.NotFound(w, r)
+					return
+				}
+				var in struct{ Params map[string]string }
+				json.NewDecoder(r.Body).Decode(&in)
+				code := in.Params["otp"]
+				now := time.Now()
+				if in.Params["username"] != "alice" || in.Params["password"] != "pw" || (code != totp.Code(seed, now, 30*time.Second, 6) && code != totp.Code(seed, now.Add(-30*time.Second), 30*time.Second, 6)) {
+					http.Error(w, "otp required", 401)
+					return
+				}
+				http.SetCookie(w, &http.Cookie{Name: "sid", Value: "test-session-token", Path: "/", Secure: true})
+				fmt.Fprint(w, `{}`)
+			}))
+			defer fake.Close()
+			var dir string
+			e := setupWithClient(t, fake.Client(), func(c *config.Config) { dir = c.Vault.Dir })
+			v := vault.New(dir)
+			if err := v.Unlock("correct horse battery staple"); err != nil {
+				t.Fatal(err)
+			}
+			out, bad := e.call(t, "session_open", map[string]any{"url": fake.URL, "site": "kibana"})
+			if bad || out["waiting_for"] != "credential_setup" {
+				t.Fatal(out)
+			}
+			human(t, e.rec.wait(t, 1), e.dir, "submit", `{"username":"alice","password":"pw","remember":"yes"}`, "")
+			if _, err := remember.Load(v, fake.URL); !errors.Is(err, vault.ErrNoEntry) {
+				t.Fatal("credentials persisted before validation", err)
+			}
+			msg := e.rec.wait(t, 2)
+			if !strings.Contains(msg, "TOTP setup secret") {
+				t.Fatal("missing seed round", msg)
+			}
+			if rememberSeed {
+				human(t, msg, e.dir, "submit", `{"remember_totp":"yes","totp_secret":"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"}`, "")
+			} else {
+				human(t, msg, e.dir, "submit", fmt.Sprintf(`{"remember_totp":"no","code":"%s"}`, totp.Code(seed, time.Now(), 30*time.Second, 6)), "")
+			}
+			out, bad = e.call(t, "session_wait", map[string]any{"login_id": out["login_id"], "max_block_seconds": 20})
+			if bad || out["status"] != "ok" {
+				t.Fatal(out)
+			}
+			rec, err := remember.Load(v, fake.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rememberSeed && string(rec.Secret) != string(seed) {
+				t.Fatal("seed was not persisted")
+			}
+			if !rememberSeed && len(rec.Secret) != 0 {
+				t.Fatal("manual OTP saved a seed")
+			}
+			if rec.Username != "alice" || rec.Password != "pw" {
+				t.Fatal("password was not saved")
+			}
+			if !rememberSeed {
+				out, bad = e.call(t, "session_open", map[string]any{"url": fake.URL, "site": "kibana", "force_refresh": true})
+				if bad || out["waiting_for"] != "totp" {
+					t.Fatal("remembered password must still ask for manual OTP", out)
+				}
+				human(t, e.rec.wait(t, 3), e.dir, "submit", fmt.Sprintf(`{"code":"%s"}`, totp.Code(seed, time.Now(), 30*time.Second, 6)), "")
+				out, bad = e.call(t, "session_wait", map[string]any{"login_id": out["login_id"], "max_block_seconds": 20})
+				if bad || out["status"] != "ok" {
+					t.Fatal("manual OTP renewal failed", out)
+				}
+				after, err := remember.Load(v, fake.URL)
+				if err != nil || len(after.Secret) != 0 || after.Revision != rec.Revision {
+					t.Fatal("manual OTP renewal changed grant", err)
+				}
+			}
+		})
 	}
 }
 

@@ -21,7 +21,7 @@ const { chromium } = require('playwright');
 
   const fillField = async (k, v) => {
     const selector = k === 'factor' ? '#f-seal-factor' : '#f-' + k;
-    if (k === 'remember') {
+    if (k === 'remember' || k === 'remember_totp') {
       await page.locator(selector).setChecked(v === true || v === 'yes');
     } else {
       await page.fill(selector, v);
@@ -139,6 +139,26 @@ const { chromium } = require('playwright');
     factorShown: (await page.$('#f-seal-factor')) !== null,
     imgs,
   };
+
+  if (action === 'remember-probe') {
+    const remember = page.locator('#f-remember');
+    const totp = page.locator('#f-remember_totp');
+    const seed = page.locator('#f-totp_secret');
+    if (await remember.isChecked() || await totp.isChecked() || await totp.isEnabled() || await seed.isVisible()) throw new Error('remember controls must default off');
+    await remember.check();
+    if (!(await totp.isEnabled()) || await seed.isVisible()) throw new Error('password-only consent exposed seed');
+    await totp.check();
+    await seed.fill('TEST-SEED');
+    await totp.uncheck();
+    if (await seed.isVisible() || await seed.inputValue() !== '') throw new Error('unchecking TOTP must clear seed');
+    await totp.check();
+    await seed.fill('TEST-SEED');
+    await remember.uncheck();
+    if (await totp.isChecked() || await totp.isEnabled() || await seed.isVisible() || await seed.inputValue() !== '') throw new Error('unchecking password must clear TOTP consent and seed');
+    out({ msg: 'consent controls verified' });
+    await browser.close();
+    return;
+  }
 
   if (action === 'probe') {
     await page.check('#verified');

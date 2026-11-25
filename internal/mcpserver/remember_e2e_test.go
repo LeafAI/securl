@@ -83,7 +83,10 @@ func TestRememberedGitLabDailyApproval(t *testing.T) {
 	if !strings.Contains(msg, "24h0m0s") {
 		t.Fatal("missing consent duration", msg)
 	}
-	human(t, msg, e.dir, "submit", `{"username":"alice","password":"secret-password","remember":"yes","totp_secret":"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"}`, "")
+	if got := human(t, msg, e.dir, "remember-probe", "{}", ""); got != "consent controls verified" {
+		t.Fatal(got)
+	}
+	human(t, msg, e.dir, "submit", `{"username":"alice","password":"secret-password","remember":"yes","remember_totp":"yes","totp_secret":"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"}`, "")
 	out, bad = e.call(t, "session_wait", map[string]any{"login_id": out["login_id"], "max_block_seconds": 20})
 	if bad || out["status"] != "ok" || logins.Load() != 1 {
 		t.Fatal("approved login failed", out)
@@ -153,7 +156,7 @@ func TestRememberedArcheryDailyApproval(t *testing.T) {
 	if !strings.Contains(msg, "6h0m0s") {
 		t.Fatal("configured duration missing from approval message", msg)
 	}
-	human(t, msg, e.dir, "submit", `{"username":"alice","password":"pw","remember":"yes","totp_secret":"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"}`, "")
+	human(t, msg, e.dir, "submit", `{"username":"alice","password":"pw","remember":"yes","remember_totp":"yes","totp_secret":"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"}`, "")
 	out, bad = e.call(t, "session_wait", map[string]any{"login_id": out["login_id"], "max_block_seconds": 20})
 	if bad || out["status"] != "ok" || !otpSeen.Load() {
 		t.Fatal("Archery login failed", out)
@@ -203,7 +206,7 @@ func TestRememberedArcheryDailyApproval(t *testing.T) {
 	human(t, e.rec.wait(t, 4), e.dir, "replace", "{}", "")
 	replacement := e.rec.wait(t, 5)
 	// Use the same synthetic account and seed as the initial enrollment.
-	values := fmt.Sprintf(`{"username":"alice","password":"pw","totp_secret":"%s"}`, base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(seed))
+	values := fmt.Sprintf(`{"username":"alice","password":"pw","remember_totp":"yes","totp_secret":"%s"}`, base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(seed))
 	human(t, replacement, e.dir, "submit", values, "")
 	out, bad = e.call(t, "session_wait", map[string]any{"login_id": out["login_id"], "max_block_seconds": 20})
 	if bad || out["status"] != "ok" {

@@ -281,13 +281,16 @@ carries only ciphertext. See `DESIGN.md` (architecture, threat model) and `MCP_T
 ### Remember website credentials (optional)
 
 Use the same protected web page as the existing login. When an agent opens a supported HTTPS website
-session, the page offers an unchecked **Remember credentials** option. Select it and, if the site supports TOTP,
-optionally enter the upstream authenticator's Base32 setup secret (not a six-digit code). securl saves the credentials
+session, the page offers two separate, initially unchecked options: **Remember credentials** saves
+the username and password, and **Remember TOTP (optional)** additionally saves the upstream authenticator's
+Base32 setup secret (not a six-digit code). TOTP storage requires credential storage and explicit separate
+consent. securl saves the credentials
 only after successful upstream authentication; this also starts the first authorization (24 hours by default).
 Leave the option unchecked to use the existing interactive username/password and one-time-code flow.
 
 While the grant is valid, securl reuses valid sessions or silently signs in again, generating the
-upstream TOTP itself. Renewal never extends the grant. After the authorized duration even a still-valid cookie
+upstream TOTP itself only if a seed was explicitly saved. Otherwise a fresh human code is needed when
+the website challenges. Renewal never extends the grant. After the authorized duration even a still-valid cookie
 cannot be used until the human approves again. The grant survives server restarts, but the existing
 vault-unlock rules still apply. Each site instance is independent.
 

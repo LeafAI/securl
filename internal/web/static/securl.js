@@ -20,15 +20,18 @@
     credential_setup: { label: 'Sign in', fields: [
       { name: 'username', label: 'Username', type: 'text', ac: 'off' },
       { name: 'password', label: 'Password', type: 'password', ac: 'off' },
-      { name: 'remember', label: 'Remember credentials and authorize access', type: 'checkbox', ac: 'off' },
-      { name: 'totp_secret', label: 'Upstream TOTP setup secret (Base32, if enabled)', type: 'password', ac: 'off', rememberOnly: true, optional: true }] },
+      { name: 'remember', label: 'Remember credentials', type: 'checkbox', ac: 'off' },
+      { name: 'remember_totp', label: 'Remember TOTP (optional)', type: 'checkbox', ac: 'off', requires: 'remember' },
+      { name: 'totp_secret', label: 'Upstream TOTP setup secret (Base32)', type: 'password', ac: 'off', requires: 'remember_totp' }] },
     credential_replace: { label: 'Replace remembered credentials', fields: [
       { name: 'username', label: 'Username', type: 'text', ac: 'off' },
       { name: 'password', label: 'Password', type: 'password', ac: 'off' },
-      { name: 'totp_secret', label: 'Upstream TOTP setup secret (Base32, if enabled)', type: 'password', ac: 'off', optional: true }] },
+      { name: 'remember_totp', label: 'Remember TOTP (optional)', type: 'checkbox', ac: 'off' },
+      { name: 'totp_secret', label: 'Upstream TOTP setup secret (Base32)', type: 'password', ac: 'off', requires: 'remember_totp' }] },
     credential_totp: { label: 'Complete two-factor authentication', fields: [
-      { name: 'totp_secret', label: 'Upstream TOTP setup secret (Base32, optional)', type: 'password', ac: 'off', optional: true },
-      { name: 'code', label: 'One-time code (not saved)', type: 'password', ac: 'one-time-code', optional: true }] },
+      { name: 'remember_totp', label: 'Remember TOTP (optional)', type: 'checkbox', ac: 'off' },
+      { name: 'totp_secret', label: 'Upstream TOTP setup secret (Base32)', type: 'password', ac: 'off', requires: 'remember_totp' },
+      { name: 'code', label: 'One-time code (not saved)', type: 'password', ac: 'one-time-code', unless: 'remember_totp' }] },
     daily_approval: { label: 'Authorize agent access', fields: [] },
     login: { label: 'Sign in', fields: [
       { name: 'username', label: 'Username', type: 'text', ac: 'off' },
@@ -256,12 +259,14 @@
       const note = document.createElement('p');
       note.textContent = ctx.mode === 'daily_approval'
         ? 'Approve access for the duration shown above using saved credentials. Update or forget them if needed. Reject does not create or extend a grant. To end an existing grant, close the session or forget the credentials.'
-        : 'Remembering credentials stores your username, password and any supplied authenticator setup secret in the encrypted vault after successful sign-in. If TOTP is enabled, use the Base32 setup secret, not a six-digit code. The first grant lasts for the duration shown above.';
+        : (ctx.mode === 'credential_replace'
+          ? 'Replacing credentials saves your new username and password after successful sign-in. Select Remember TOTP only if you also want to save the authenticator setup secret. Otherwise the previous saved TOTP secret is removed after successful replacement.'
+          : 'Remember credentials saves your username and password in the encrypted vault after successful sign-in. Remember TOTP is a separate optional choice: select it only if you want to save your authenticator setup secret. The first grant lasts for the duration shown above.');
       box.append(note);
     }
     if (ctx.mode === 'credential_totp') {
       const note = document.createElement('p');
-      note.textContent = 'Enter the TOTP setup secret to generate future codes automatically, or enter a one-time code instead. One-time codes are never saved; future logins may still need you to enter a fresh code.';
+      note.textContent = 'Enter a one-time code, or select Remember TOTP to save your authenticator setup secret and generate future codes automatically. One-time codes are never saved.';
       box.append(note);
     }
     $('submit').textContent = ctx.mode === 'daily_approval' ? 'Approve' : (ctx.mode === 'credential_replace' ? 'Replace and authorize' : (ctx.mode === 'credential_setup' ? 'Sign in' : 'Submit'));
@@ -289,12 +294,25 @@
       inp.setAttribute('autocorrect', 'off');
       if (f.numeric) inp.inputMode = 'numeric';
       box.append(inp);
-      if (f.rememberOnly) {
+      if (f.requires || f.unless) {
+        const controller = $('f-' + (f.requires || f.unless));
         const update = () => {
-          l.hidden = inp.hidden = inp.disabled = !$('f-remember').checked;
-          if (inp.disabled) inp.value = '';
+          const selected = !controller.disabled && controller.checked;
+          const enabled = f.requires ? selected : !selected;
+          // Keep the optional TOTP checkbox visible but unavailable until
+          // password storage is selected. Hide only its secret input.
+          l.hidden = inp.hidden = f.type !== 'checkbox' && !enabled;
+          inp.disabled = !enabled;
+          if (!enabled) {
+            if (f.type === 'checkbox') {
+              inp.checked = false;
+            } else {
+              inp.value = '';
+            }
+          }
+          inp.dispatchEvent(new Event('change'));
         };
-        $('f-remember').addEventListener('change', update);
+        controller.addEventListener('change', update);
         update();
       }
     });
