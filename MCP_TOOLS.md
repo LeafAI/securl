@@ -129,7 +129,7 @@ right but the server could not open: a TOTP factor is on and its secret is missi
 ## 1. `session_open`
 
 Open a session on a website. May ask the human (DingTalk) for one or more rounds (e.g. the `login` step, then `totp`).
-The agent never sees the password. Enrolled GitLab/Archery sites ask for a single `daily_approval` round and silently renew sessions during the fixed authorization grant (security.credential_authorization_ttl, default 24h). Enrollment takes place on the existing protected web page: the human selects Remember credentials and enters the upstream TOTP setup secret. Credentials are saved only after a successful login, which starts the first grant. The agent never supplies credentials.
+The agent never sees the password. Enrolled websites ask for a `daily_approval` round and renew sessions during the fixed authorization grant (security.credential_authorization_ttl, default 24h). Enrollment takes place on the existing protected web page: the human selects Remember credentials and optionally enters the upstream TOTP setup secret. Password-only accounts do not need a seed. CAPTCHA and one-time codes without an enrolled seed require fresh human input and are never saved. Credentials are saved only after a successful login, which starts the first grant. The agent never supplies credentials.
 
 Input
 ```jsonc
@@ -138,7 +138,7 @@ Input
   "site":  {"type":"string","description":"Driver name (see site_list). Auto-detected from the URL when omitted."},
   "reason":{"type":"string","maxLength":200,"description":"Why the agent needs access; shown to the human in DingTalk."},
   "force_refresh":{"type":"boolean","default":false,"description":"Skip the cached session and log in again."},
-  "manage_credentials":{"type":"boolean","default":false,"description":"Open the verified GitLab or Archery credential-management page, even during a valid grant."},
+  "manage_credentials":{"type":"boolean","default":false,"description":"Open the verified website credential-management page, even during a valid grant."},
   "wait":  {"type":"boolean","default":true,"description":"false: return `pending` immediately after notifying the human."},
   "max_block_seconds":{"type":"integer","minimum":1,"maximum":600,"description":"Override the default blocking time."} } }
 ```
@@ -154,7 +154,7 @@ Output (`oneOf` by `status`)
 
 // status = "pending"
 { "status":"pending", "login_id":"lg_3f9a...", "site":"gitlab",
-  "waiting_for":"login" | "totp" | "custom" | "credential_setup" | "credential_replace" | "daily_approval",      // the current round
+  "waiting_for":"login" | "totp" | "custom" | "credential_setup" | "credential_replace" | "credential_totp" | "daily_approval",      // the current round
   "round":1, "expires_at":"2026-10-10T08:10:00Z", // when the human link stops working
   "next_tool":"session_wait",
   "link":"https://...#...", "key_code":"8885 4F38 DA77 58C0", "instruction":"..." }   // only with link_via_agent, see below
@@ -186,8 +186,8 @@ share one flow (same `login_id`). The daily page supports approval, rejection, r
 ## 1a. `request`
 
 Send an HTTP request to a site that has a session. The gateway puts the session's cookies and tokens into the request and
-removes them from the answer, so the agent neither sends nor receives a credential. For enrolled GitLab/Archery sites, it may silently reauthenticate under a valid grant. Otherwise it never opens a session by itself:
-without one it answers `no_session` (asking a person is `session_open`'s job). After authorization expires call `session_open` for approval. A request that encounters an upstream 401 is not automatically replayed, especially for writes. A site that needs no login at all (SkyWalking, unless the owner configured it with `oauth2_sites`, in which case it has a
+removes them from the answer, so the agent neither sends nor receives a credential. For enrolled websites, it may silently reauthenticate under a valid grant. Otherwise it never opens a session by itself:
+without one it answers `no_session` (asking a person is `session_open`'s job). After authorization expires call `session_open` for approval. If renewal requires a fresh human challenge, request returns human_challenge_required; call session_open. A changed configured authentication definition returns credential_configuration_changed; request manage_credentials to replace the credential. A request that encounters an upstream 401 is not automatically replayed, especially for writes. A site that needs no login at all (SkyWalking, unless the owner configured it with `oauth2_sites`, in which case it has a
 session like any other site)
 has no session to look for: the request goes out as it is, with no credential added.
 
@@ -268,12 +268,14 @@ Input: `{}`. Output: no secrets, ever.
 
 For sessions using enrolled credentials, `authorization_expires_at` gives the grant deadline and `authorization_valid` reports whether the current vault grant still matches the saved session. These fields are omitted for ordinary sessions.
 
+The `site_list` field `remember_credentials` indicates that a driver supports opt-in reusable web credentials. Actual enrollment requires HTTPS and independent human verification.
+
 ## 5. `session_close`
 
 Input: `{ "url": string?, "all": boolean?, "reason": string?, "close_id": string?, "max_block_seconds": integer? }` — exactly
 one of `url` and `all`. Output: `{ "status": "closed" | "pending", "removed": integer, ... }`.
 
-For enrolled GitLab/Archery sites, confirmed closing revokes the grant but retains the stored credential. The scope also includes active grants without a cached session. For other sites closing forgets what a person typed, and a database account is a password nobody can give back, so **nothing is closed until
+For enrolled websites, confirmed closing revokes the grant but retains the stored credential. The scope also includes active grants without a cached session. For other sites closing forgets what a person typed, and a database account is a password nobody can give back, so **nothing is closed until
 a person has confirmed it**. The call computes the saved sessions in scope, and if there are none it answers
 `{"status":"closed","removed":0}` and bothers nobody. Otherwise the person gets the usual link (DingTalk, or the answer with
 `security.link_via_agent`) to a page that names every session that goes (`db://target` for a database, where the message

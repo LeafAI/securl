@@ -5,6 +5,7 @@ package generic
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/LeafAI/securl/internal/site"
+	"gopkg.in/yaml.v3"
 )
 
 type Step struct {
@@ -68,7 +70,13 @@ func New(spec Spec) (site.Driver, error) {
 	return d, nil
 }
 
-func (d *driver) Name() string     { return d.spec.Name }
+func (d *driver) Name() string { return d.spec.Name }
+
+// RememberScope binds saved credentials to this exact configured driver definition.
+func (d *driver) RememberScope() (string, *url.URL) {
+	b, _ := yaml.Marshal(d.spec)
+	return fmt.Sprintf("generic:%x", sha256.Sum256(b)), nil
+}
 func (d *driver) NeedsLogin() bool { return true }
 func (d *driver) Match(u *url.URL) bool {
 	return d.spec.MatchHost != "" && strings.Contains(strings.ToLower(u.Hostname()), strings.ToLower(d.spec.MatchHost))

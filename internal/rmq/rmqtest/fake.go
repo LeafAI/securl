@@ -45,6 +45,8 @@ type Message struct {
 	// is and the flag says what a client that cannot read them must say no to).
 	Compressed  bool
 	Compression int32
+	// Precompressed indicates Body already holds zlib wire bytes (fixture setup).
+	Precompressed bool
 	// V2 writes the second magic code, whose topic length is two bytes instead of one.
 	V2 bool
 	// V6 writes the born host and the store host as 16-byte IPv6 addresses and says so in the system flag.
@@ -489,7 +491,7 @@ func EncodeMessage(topic string, queue int, offset int64, m Message) []byte {
 	body := m.Body
 	var sys int32
 	if m.Compressed {
-		if m.Compression == 0 || m.Compression == 0x300 {
+		if !m.Precompressed && (m.Compression == 0 || m.Compression == 0x300) {
 			body = Deflate(body)
 		}
 		sys |= 0x1 | m.Compression

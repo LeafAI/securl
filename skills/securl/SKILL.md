@@ -464,8 +464,11 @@ carries a credential. With no arguments (or only `-config`), `securl` is still t
 
 **Sessions and sites**
 
-- `securl session open --url <url> [--site <driver>] [--reason <text>] [--force-refresh] [--wait=false] [--max-block-seconds <n>]`
-  opens a session; a person types the credential on a page. `--wait=false` returns the pending answer at once (exit `4`) instead
+- `securl session open --url <url> [--site <driver>] [--reason <text>] [--force-refresh] [--manage-credentials] [--wait=false] [--max-block-seconds <n>]`
+  opens a session; a person types the credential on a protected page. For supported HTTPS websites,
+  the person may opt in to encrypted remembered credentials and a fixed-duration authorization grant.
+  `--manage-credentials` opens the protected approval/replacement/removal page even during a valid grant.
+  Do not ask for passwords or TOTP setup secrets in agent input. `--wait=false` returns the pending answer at once (exit `4`) instead
   of waiting. A database is `--url db://<target>`.
 - `securl session wait --login-id <id> [--max-block-seconds <n>]` keeps waiting for a login that answered pending.
 - `securl session list` shows which sessions exist. Names and times, never a credential. It needs the vault open.

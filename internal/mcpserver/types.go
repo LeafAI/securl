@@ -28,7 +28,7 @@ func errf(code string, retryable bool, format string, a ...any) *ToolError {
 }
 
 type LoginInput struct {
-	ManageCredentials bool   `json:"manage_credentials,omitempty" jsonschema:"Ask the human to manage remembered GitLab or Archery credentials on the protected page, even when the current session is valid. No credentials are accepted in tool arguments."`
+	ManageCredentials bool   `json:"manage_credentials,omitempty" jsonschema:"Ask the human to manage remembered website credentials on the protected page, even when the current session is valid. No credentials are accepted in tool arguments."`
 	URL               string `json:"url" jsonschema:"Any URL on the site; scheme+host identify the site."`
 	Site              string `json:"site,omitempty" jsonschema:"Driver name (see site_list). Auto-detected from the URL when omitted."`
 	Reason            string `json:"reason,omitempty" jsonschema:"Why the agent needs access; shown to the human in DingTalk."`
@@ -128,12 +128,13 @@ type VaultStatusOutput struct {
 type Empty struct{}
 
 type SiteInfo struct {
-	Name       string   `json:"name"`
-	Auth       string   `json:"auth"`
-	NeedsLogin bool     `json:"needs_login"`
-	Rounds     []string `json:"rounds"`
-	Match      string   `json:"match"`
-	Source     string   `json:"source"`
+	RememberCredentials bool     `json:"remember_credentials"`
+	Name                string   `json:"name"`
+	Auth                string   `json:"auth"`
+	NeedsLogin          bool     `json:"needs_login"`
+	Rounds              []string `json:"rounds"`
+	Match               string   `json:"match"`
+	Source              string   `json:"source"`
 }
 
 type SitesOutput struct {

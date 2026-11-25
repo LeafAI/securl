@@ -278,18 +278,27 @@ a daemon restart locks its vault and interrupts pending login flows.
 The static page is served by GitHub Pages (version-pinned) or from your disk (`securl page [dir]`); the tunnel
 carries only ciphertext. See `DESIGN.md` (architecture, threat model) and `MCP_TOOLS.md` (tool schemas).
 
-### Remember GitLab and Archery credentials (optional)
+### Remember website credentials (optional)
 
-Use the same protected web page as the existing login. When an agent opens a GitLab or Archery
-HTTPS session, the page offers an unchecked **Remember credentials** option. Select it and enter
-the upstream authenticator's Base32 setup secret (not a six-digit code). securl saves the credentials
+Use the same protected web page as the existing login. When an agent opens a supported HTTPS website
+session, the page offers an unchecked **Remember credentials** option. Select it and, if the site supports TOTP,
+optionally enter the upstream authenticator's Base32 setup secret (not a six-digit code). securl saves the credentials
 only after successful upstream authentication; this also starts the first authorization (24 hours by default).
 Leave the option unchecked to use the existing interactive username/password and one-time-code flow.
 
 While the grant is valid, securl reuses valid sessions or silently signs in again, generating the
 upstream TOTP itself. Renewal never extends the grant. After the authorized duration even a still-valid cookie
 cannot be used until the human approves again. The grant survives server restarts, but the existing
-vault-unlock rules still apply. GitLab and Archery instances are independent.
+vault-unlock rules still apply. Each site instance is independent.
+
+Supported drivers include GitLab, Archery, Jenkins, Kibana, KubeSphere, Nightingale, configured generic
+websites and configured OAuth2 websites using GitLab as the identity provider. Password-only sites need no
+TOTP secret. If a fresh CAPTCHA or one-time code is required and no reusable seed is available, a human
+must answer it on the protected page; these temporary answers are never stored. An ordinary request
+that needs a fresh human challenge returns human_challenge_required; use session_open to open the page.
+For OAuth2 websites the page shows the configured identity provider and the destination; the grant
+is bound to that destination and configuration, not shared with other applications. No-auth sites and
+non-web protocol targets do not use this feature.
 
 Set the desired authorization duration in config.yaml:
 
@@ -302,7 +311,7 @@ The page and DingTalk message display the configured duration. It is saved with 
 a configuration change takes effect for subsequent approvals after restarting securl and does not
 extend or shorten a previously granted authorization. Use session_close to revoke an existing grant.
 
-The daily approval page offers **Approve**, **Reject**, **Update credentials**, and **Forget credentials**.
+The authorization page offers **Approve**, **Reject**, **Update credentials**, and **Forget credentials**.
 To open it before the current grant expires, call the existing session_open tool with
 manage_credentials set to true. No credentials are passed in tool arguments. Confirmed session_close
 revokes the current grant while retaining remembered credentials. Forgetting credentials removes them

@@ -139,7 +139,12 @@ const (
 	oaGitLab = "gl-oauth-session-VALUE"
 )
 
-func newOAuthStack(t *testing.T) *oauthStack {
+func newOAuthStack(t *testing.T, tlsMode ...bool) *oauthStack {
+	tls := len(tlsMode) > 0 && tlsMode[0]
+	start := httptest.NewServer
+	if tls {
+		start = httptest.NewTLSServer
+	}
 	o := &oauthStack{codes: map[string]bool{}}
 	glMux := http.NewServeMux()
 	glMux.HandleFunc("/users/sign_in", func(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +177,7 @@ func newOAuthStack(t *testing.T) *oauthStack {
 		back.RawQuery = v.Encode()
 		http.Redirect(w, r, back.String(), 302)
 	})
-	o.gl = httptest.NewServer(glMux)
+	o.gl = start(glMux)
 
 	altMux := http.NewServeMux()
 	altMux.HandleFunc("/oauth2/idpresponse", func(w http.ResponseWriter, r *http.Request) {
@@ -203,17 +208,20 @@ func newOAuthStack(t *testing.T) *oauthStack {
 		o.nonce, o.state = fmt.Sprintf("nonce-%d", o.issued), fmt.Sprintf("state-%d", o.issued)
 		http.SetCookie(w, &http.Cookie{Name: "AWSALBAuthNonce", Value: o.nonce, Path: "/", Expires: time.Now().Add(15 * time.Minute)})
 		glURL, _ := url.Parse(o.gl.URL)
-		ru := "http://" + r.Host + "/oauth2/idpresponse"
+		ru := glURL.Scheme + "://" + r.Host + "/oauth2/idpresponse"
 		qs := url.Values{"client_id": {"c1"}, "redirect_uri": {ru}, "response_type": {"code"}, "scope": {"openid"}, "state": {o.state}}
-		http.Redirect(w, r, "http://localhost:"+glURL.Port()+"/oauth/authorize?"+qs.Encode(), 302)
+		http.Redirect(w, r, o.idpURL()+"/oauth/authorize?"+qs.Encode(), 302)
 	})
-	o.alb = httptest.NewServer(altMux)
+	o.alb = start(altMux)
 	t.Cleanup(func() { o.gl.Close(); o.alb.Close() })
 	return o
 }
 
 func (o *oauthStack) idpURL() string {
 	u, _ := url.Parse(o.gl.URL)
+	if u.Scheme == "https" {
+		return o.gl.URL
+	}
 	return "http://localhost:" + u.Port()
 }
 

@@ -138,14 +138,17 @@ func (c *Cache) Lookup(ctx context.Context, u *url.URL, hc *http.Client, fresh t
 
 // authorized binds cookies to the current persisted authorization, including across daemon processes.
 func (c *Cache) authorized(key string, e *Entry) error {
-	if c.store == nil || (!remember.Supported(e.Site) && e.Session.ApprovalID == "" && c.store.v.State() != vault.Unlocked) {
+	if c.store == nil || (!remember.Supports(e.Driver) && e.Session.ApprovalID == "" && c.store.v.State() != vault.Unlocked) {
 		return nil
 	}
 	r, err := remember.Load(c.store.v, key)
 	if errors.Is(err, vault.ErrNoEntry) && e.Session.ApprovalID == "" {
 		return nil
 	}
-	if err != nil || !r.Valid(time.Now()) || r.Site != e.Site || r.Revision != e.Session.ApprovalID || !r.ApprovedAt.Equal(e.Session.ApprovalAt) || r.Duration != e.Session.ApprovalDuration {
+	if err != nil || !r.Valid(time.Now()) || !r.Matches(e.Driver) || r.Site != e.Site || r.Revision != e.Session.ApprovalID || !r.ApprovedAt.Equal(e.Session.ApprovalAt) || r.Duration != e.Session.ApprovalDuration {
+		return ErrExpired
+	}
+	if d, err := site.Resolve(e.Site, nil); err != nil || !r.Matches(d) {
 		return ErrExpired
 	}
 	return nil
