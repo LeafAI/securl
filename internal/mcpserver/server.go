@@ -394,24 +394,29 @@ func addTool[In, Out any](m *mcp.Server, obs observer, sp spec[Out],
 	name := sp.name
 	m.AddTool(&mcp.Tool{Name: name, Title: sp.title, Description: sp.desc, InputSchema: schema, OutputSchema: out, Annotations: sp.ann},
 		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			start := time.Now()
 			var in In
 			if len(req.Params.Arguments) > 0 {
 				dec := json.NewDecoder(strings.NewReader(string(req.Params.Arguments)))
 				dec.DisallowUnknownFields()
 				if err := dec.Decode(&in); err != nil {
-					return toolError(errf("invalid_argument", false, "%v", err)), nil
+					terr := errf("invalid_argument", false, "%v", err)
+					obs(name, req, nil, nil, terr, time.Since(start))
+					return toolError(terr), nil
 				}
 			}
-			start := time.Now()
 			res, terr := h(ctx, req, in)
-			obs(name, req, in, res, terr, time.Since(start))
 			if terr != nil {
+				obs(name, req, in, nil, terr, time.Since(start))
 				return toolError(terr), nil
 			}
 			b, err := json.Marshal(res)
 			if err != nil {
-				return toolError(errf("internal", false, "encode result: %v", err)), nil
+				terr := errf("internal", false, "encode result: %v", err)
+				obs(name, req, in, nil, terr, time.Since(start))
+				return toolError(terr), nil
 			}
+			obs(name, req, in, res, nil, time.Since(start))
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}, StructuredContent: json.RawMessage(b)}, nil
 		})
 	return nil

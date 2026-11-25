@@ -15,6 +15,10 @@ import (
 
 // Event is one line of the audit log.
 type Event struct {
+	Arguments map[string]any `json:"arguments,omitempty"` // allowlisted tool arguments, never raw payloads
+	Outcome   map[string]any `json:"outcome,omitempty"`   // allowlisted result metadata
+	Retryable *bool          `json:"retryable,omitempty"`
+
 	Time      string   `json:"time"`
 	Event     string   `json:"event"`              // tool_call | human_request | human_round | tunnel | rate_limited
 	Tool      string   `json:"tool,omitempty"`     // MCP tool name

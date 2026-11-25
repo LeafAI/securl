@@ -55,6 +55,7 @@ func (s *Server) onTunnel(f *flow.Flow, provider string, attempts int) {
 type targeter interface{ target() string }
 type sqler interface{ sqlText() string }
 
+func (i RequestInput) target() string  { return i.URL }
 func (i LoginInput) target() string    { return i.URL }
 func (i LogoutInput) target() string   { return i.URL }
 func (i DBQueryInput) target() string  { return "db://" + i.Target }
@@ -91,10 +92,10 @@ func clientName(req *mcp.CallToolRequest) string {
 
 // observe records one finished tool call: metadata only, never the result's secrets or the SQL text.
 func (s *Server) observe(tool string, req *mcp.CallToolRequest, in, out any, terr *ToolError, took time.Duration) {
-	e := audit.Event{Event: "tool_call", Tool: tool, Client: clientName(req), Millis: took.Milliseconds(), Result: "ok"}
+	e := audit.Event{Event: "tool_call", Tool: tool, Client: clip(clientName(req), 200), Millis: took.Milliseconds(), Result: "ok", Arguments: auditArguments(in), Outcome: auditOutcome(out)}
 	if t, ok := in.(targeter); ok {
 		if u, err := url.Parse(t.target()); err == nil {
-			e.Host = u.Host
+			e.Host = clip(u.Host, 200)
 		}
 	}
 	if q, ok := in.(sqler); ok {
@@ -105,12 +106,15 @@ func (s *Server) observe(tool string, req *mcp.CallToolRequest, in, out any, ter
 	}
 	switch o := out.(type) {
 	case *LoginOutput:
-		e.Site, e.Result, e.Cached = o.Site, o.Status, o.Cached
+		if o != nil {
+			e.Site, e.Result, e.Cached = o.Site, o.Status, o.Cached
+		}
 	case ArcheryOut:
 		e.Result, e.Workflow = o.Status, o.WorkflowID
 	}
 	if terr != nil {
 		e.Result = terr.Code
+		e.Retryable = &terr.Retryable
 	}
 	s.audit.Record(e)
 }

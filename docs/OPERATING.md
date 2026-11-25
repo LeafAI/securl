@@ -269,8 +269,16 @@ securl config totp off link       # switch off, keep the secret (so your authent
 ### Audit log and request limits
 
 * `audit.jsonl` (next to the config; 0600) gets one JSON line per tool call, per request that reached a person and
-  per refusal. It records who (MCP client name), which host, the reason the agent gave and the result. It never
-  holds cookies, tokens, passwords or SQL text (only its length and a short hash).
+  per refusal. It records who (MCP client name), which host, the reason the agent gave and the result.
+  The `tool_call` event also includes allowlisted `arguments` and `outcome` metadata: operation options,
+  target names, flow/workflow IDs, limits, result counts and sizes, and `retryable` on errors.
+  Raw SQL and sent messages are represented by lengths and short hashes; HTTP bodies, header/query/form
+  values, Redis keys/values, message contents, tokens, passwords, and authorization links are excluded.
+  Do not put secrets in free-text reasons or target names. Malformed arguments rejected by the registered
+  tool handler are logged with the error code only, not the submitted data.
+  For example, inspect completed calls using `jq -c 'select(.event == "tool_call")' audit.jsonl`,
+  or select one tool using `jq -c 'select(.event == "tool_call" and .tool == "session_open")' audit.jsonl`.
+  The log is enabled by default; `audit.file` changes the destination and `audit.enabled: false` disables it.
   Handy questions: `grep '"event":"human_request"' audit.jsonl` (which logins reached a person),
   `grep '"event":"human_round"' audit.jsonl` (every message sent: password, TOTP, ...), `grep rate_limited audit.jsonl`.
 * `session_close` is asked of a person before it closes anything, because a saved session is what somebody typed once and a
