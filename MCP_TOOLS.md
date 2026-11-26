@@ -205,7 +205,7 @@ Input
   "method": {"type":"string","description":"GET, HEAD, POST, PUT, PATCH, DELETE or OPTIONS."},
   "path":   {"type":"string","description":"Absolute path starting with /. No query, no host, no fragment, no .. segment."},
   "query":  {"type":"object","description":"Each name maps to a string or a list of strings."},
-  "headers":{"type":"object","description":"Ordinary headers. Cookie, Authorization, Host, Content-Length, Transfer-Encoding, Connection, Upgrade, TE, Expect, Accept-Encoding, Trailer, Keep-Alive and any header the session itself sets are refused."},
+  "headers":{"type":"object","description":"Ordinary headers. Cookie, Authorization, X-Ga-Code, Host, Content-Length, Transfer-Encoding, Connection, Upgrade, TE, Expect, Accept-Encoding, Trailer, Keep-Alive and any header the session itself sets are refused."},
   "json":   {"description":"A JSON body (any JSON value; large integers keep their exact text)."},
   "form":   {"type":"object","description":"A form-encoded body."},
   "text":   {"type":"string"}, "base64": {"type":"string","description":"A binary body, standard base64."},

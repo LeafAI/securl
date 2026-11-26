@@ -1059,3 +1059,63 @@ func TestDriverStateIsNotScrubbedButRealTokensAre(t *testing.T) {
 		t.Errorf("a crumb is a credential: %s", res.Body)
 	}
 }
+
+// The code of a second factor is the one credential a request must never carry from the agent: it is made here, from a seed the
+// agent never sees, for the one request that needs it, and an agent that could send its own could pass on a code it was told, or
+// try codes against an account that locks after a few wrong ones. Every spelling of the name is refused, with the request refused
+// as invalid and nothing sent.
+func TestTheAgentCannotSetTheHeaderThatCarriesASecondFactorCode(t *testing.T) {
+	p, base, sn := newProxy(t, http.HandlerFunc(echo))
+	for _, h := range []string{"x-ga-code", "X-Ga-Code", "X-GA-CODE", "x-GA-code", "X-Ga-Code"} {
+		r := req(base, "GET", "/api/me")
+		r.Headers = map[string]string{h: "123456"}
+		before := sn.count()
+		_, err := p.Do(context.Background(), session(), r)
+		if !errors.Is(err, ErrInvalid) {
+			t.Errorf("header %q set by the agent must be refused as invalid: %v", h, err)
+		}
+		if sn.count() != before {
+			t.Errorf("header %q: nothing may be sent when the request is refused", h)
+		}
+	}
+}
+
+func TestTheSecondFactorHeaderIsRefusedByTheListOfForbiddenHeadersAlone(t *testing.T) {
+	sess := &site.Session{} // no headers of its own: only the fixed list can be what refuses this
+	for _, h := range []string{"x-ga-code", "X-Ga-Code", "X-GA-CODE"} {
+		if _, err := agentHeaders(map[string]string{h: "123456"}, sess); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s must be refused as invalid: %v", h, err)
+		}
+	}
+	if !forbidden["x-ga-code"] {
+		t.Error("the list of headers an agent may not set does not name x-ga-code")
+	}
+}
+
+// A header with a similar name is an ordinary header and is not caught by the one rule.
+func TestHeadersThatOnlyLookLikeTheSecondFactorHeaderAreOrdinary(t *testing.T) {
+	sess := &site.Session{}
+	for _, h := range []string{"x-ga", "x-ga-codes", "x-ga-code-note", "x-gb-code", "ga-code", "x-ga_code"} {
+		if _, err := agentHeaders(map[string]string{h: "v"}, sess); err != nil {
+			t.Errorf("%s is an ordinary header: %v", h, err)
+		}
+	}
+}
+
+// The agent's request carries the session's own headers and nothing it chose for this name, whether it asked in the headers or put
+// the word in the body: a value in a JSON body is the site's to read, and this proxy never turns a body field into a header.
+func TestAGaFieldInTheBodyIsNotTurnedIntoAHeader(t *testing.T) {
+	var seen http.Header
+	p, base, _ := newProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Clone()
+		w.WriteHeader(200)
+	}))
+	r := req(base, "POST", "/api/x")
+	r.JSON = json.RawMessage(`{"bizContent":{"ga":"123456"}}`)
+	if _, err := p.Do(context.Background(), session(), r); err != nil {
+		t.Fatal(err)
+	}
+	if v := seen.Get("X-Ga-Code"); v != "" {
+		t.Errorf("a field of the body became the header X-Ga-Code: %q", v)
+	}
+}

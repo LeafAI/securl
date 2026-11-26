@@ -142,10 +142,12 @@ func invalid(format string, a ...any) error {
 var allowedMethods = map[string]bool{"GET": true, "HEAD": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true, "OPTIONS": true}
 
 // forbidden are the headers an agent may not set: those that carry or steer credentials, and those that frame the message.
+// x-ga-code is the header a second-factor code travels in (the admin console's): the code is made here, from a seed the agent never
+// holds, for the one request that needs it, so an agent can neither pass on a code it was told nor try codes against an account.
 var forbidden = map[string]bool{
 	"cookie": true, "authorization": true, "proxy-authorization": true, "host": true, "content-length": true,
 	"transfer-encoding": true, "connection": true, "proxy-connection": true, "upgrade": true, "te": true, "expect": true,
-	"accept-encoding": true, "trailer": true, "keep-alive": true,
+	"accept-encoding": true, "trailer": true, "keep-alive": true, "x-ga-code": true,
 }
 
 func isToken(s string) bool {
