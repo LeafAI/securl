@@ -170,3 +170,39 @@ func TestTheGeneratedFileIsIgnoredByGit(t *testing.T) {
 		t.Errorf("%s is not in .gitignore: %v", driverbuild.ExtraFile, err)
 	}
 }
+
+// The second example is part of the same driver as the first (it adds methods to the type the first one declares), so both are built
+// together, as an outside module would build them.
+func TestTheExtraInterfacesExampleCompilesWithTheDriverBesideIt(t *testing.T) {
+	doc := driversDoc(t)
+	first, extra := codeBlocks(doc, "go"), codeBlocks(doc, "go-extra")
+	if len(first) != 1 || len(extra) != 1 {
+		t.Fatalf("the document has %d go examples and %d go-extra examples", len(first), len(extra))
+	}
+	root, _ := os.Getwd()
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "admin"), 0o755)
+	os.WriteFile(filepath.Join(dir, "admin", "admin.go"), []byte(first[0]), 0o644)
+	os.WriteFile(filepath.Join(dir, "admin", "extra.go"), []byte(extra[0]), 0o644)
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.test/admin\n\ngo 1.26.9\n\nrequire github.com/LeafAI/securl v0.0.0\n\nreplace github.com/LeafAI/securl => "+root+"\n"), 0o644)
+	sum, _ := os.ReadFile(filepath.Join(root, "go.sum"))
+	os.WriteFile(filepath.Join(dir, "go.sum"), sum, 0o644)
+	cmd := exec.Command("go", "vet", "./admin/")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOPROXY=off")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("the extra-interfaces example in docs/DRIVERS.md does not build:\n%s", out)
+	}
+}
+
+func TestTheDocumentSaysWhatTheCodeOnEveryRequestDoesAndDoesNot(t *testing.T) {
+	doc := strings.ToLower(strings.Join(strings.Fields(strings.ReplaceAll(driversDoc(t), "**", "")), " "))
+	for _, want := range []string{
+		"driver.secondfactor", "driver.loginextras", "driver.reservedfieldnames()", "on every request while their approval is in force", "the driver never sees the seed or a code",
+		"an agent cannot send one (`x-ga-code` is refused)", "is not tried again and again", "scrubs it from what comes back",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("docs/DRIVERS.md does not say %q", want)
+		}
+	}
+}

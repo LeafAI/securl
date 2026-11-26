@@ -75,7 +75,7 @@ type RequestInput struct {
 	Method           string                `json:"method" jsonschema:"GET, HEAD, POST, PUT, PATCH, DELETE or OPTIONS."`
 	Path             string                `json:"path" jsonschema:"Absolute path on the site, starting with /. No query string and no host: use the query field."`
 	Query            map[string]multiValue `json:"query,omitempty" jsonschema:"Query parameters. Each name maps to a string, or a list of strings for a repeated parameter."`
-	Headers          map[string]string     `json:"headers,omitempty" jsonschema:"Ordinary request headers (Accept, X-Request-Id, ...). Cookie, Authorization, Host and the session's own headers are set by the gateway and refused here."`
+	Headers          map[string]string     `json:"headers,omitempty" jsonschema:"Ordinary request headers (Accept, X-Request-Id, ...). Cookie, Authorization, Host, X-Ga-Code and the session's own headers are set by the gateway and refused here."`
 	JSON             json.RawMessage       `json:"json,omitempty" jsonschema:"A JSON request body (any JSON value)."`
 	Form             map[string]multiValue `json:"form,omitempty" jsonschema:"A form-encoded request body. Each name maps to a string, or a list of strings."`
 	Text             string                `json:"text,omitempty" jsonschema:"A plain-text request body."`

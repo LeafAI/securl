@@ -75,6 +75,7 @@ func (s *Server) openCore() error {
 	c.telegram = newTelegramBots()
 	c.dingtalk = newDingTalkGroups()
 	c.zulip = newZulipServers()
+	c.refused = newRefusedGrants()
 	c.tracker = archery.NewTracker(s.cfg.Archery.DDLAllowed(), s.cfg.Archery.WaitTimeout)
 	c.tracker.Poll = s.cfg.Archery.PollInterval
 	s.core = c

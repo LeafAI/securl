@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -63,6 +64,12 @@ func (s *seen) last() *recorded {
 }
 
 func (s *seen) count() int { s.mu.Lock(); defer s.mu.Unlock(); return len(s.reqs) }
+
+func (s *seen) all() []*recorded {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*recorded(nil), s.reqs...)
+}
 
 func newProxy(t *testing.T, h http.Handler) (*Proxy, *url.URL, *seen) {
 	t.Helper()
@@ -1057,5 +1064,359 @@ func TestDriverStateIsNotScrubbedButRealTokensAre(t *testing.T) {
 	}
 	if strings.Contains(res.Body, "CRUMB-VALUE") {
 		t.Errorf("a crumb is a credential: %s", res.Body)
+	}
+}
+
+// The code of a second factor is the one credential a request must never carry from the agent: it is made here, from a seed the
+// agent never sees, for the one request that needs it, and an agent that could send its own could pass on a code it was told, or
+// try codes against an account that locks after a few wrong ones. Every spelling of the name is refused, with the request refused
+// as invalid and nothing sent.
+func TestTheAgentCannotSetTheHeaderThatCarriesASecondFactorCode(t *testing.T) {
+	p, base, sn := newProxy(t, http.HandlerFunc(echo))
+	for _, h := range []string{"x-ga-code", "X-Ga-Code", "X-GA-CODE", "x-GA-code", "X-Ga-Code"} {
+		r := req(base, "GET", "/api/me")
+		r.Headers = map[string]string{h: "123456"}
+		before := sn.count()
+		_, err := p.Do(context.Background(), session(), r)
+		if !errors.Is(err, ErrInvalid) {
+			t.Errorf("header %q set by the agent must be refused as invalid: %v", h, err)
+		}
+		if sn.count() != before {
+			t.Errorf("header %q: nothing may be sent when the request is refused", h)
+		}
+	}
+}
+
+func TestTheSecondFactorHeaderIsRefusedByTheListOfForbiddenHeadersAlone(t *testing.T) {
+	sess := &site.Session{} // no headers of its own: only the fixed list can be what refuses this
+	for _, h := range []string{"x-ga-code", "X-Ga-Code", "X-GA-CODE"} {
+		if _, err := agentHeaders(map[string]string{h: "123456"}, sess); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s must be refused as invalid: %v", h, err)
+		}
+	}
+	if !forbidden["x-ga-code"] {
+		t.Error("the list of headers an agent may not set does not name x-ga-code")
+	}
+}
+
+// A header with a similar name is an ordinary header and is not caught by the one rule.
+func TestHeadersThatOnlyLookLikeTheSecondFactorHeaderAreOrdinary(t *testing.T) {
+	sess := &site.Session{}
+	for _, h := range []string{"x-ga", "x-ga-codes", "x-ga-code-note", "x-gb-code", "ga-code", "x-ga_code"} {
+		if _, err := agentHeaders(map[string]string{h: "v"}, sess); err != nil {
+			t.Errorf("%s is an ordinary header: %v", h, err)
+		}
+	}
+}
+
+// The agent's request carries the session's own headers and nothing it chose for this name, whether it asked in the headers or put
+// the word in the body: a value in a JSON body is the site's to read, and this proxy never turns a body field into a header.
+func TestAGaFieldInTheBodyIsNotTurnedIntoAHeader(t *testing.T) {
+	var seen http.Header
+	p, base, _ := newProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Clone()
+		w.WriteHeader(200)
+	}))
+	r := req(base, "POST", "/api/x")
+	r.JSON = json.RawMessage(`{"bizContent":{"ga":"123456"}}`)
+	if _, err := p.Do(context.Background(), session(), r); err != nil {
+		t.Fatal(err)
+	}
+	if v := seen.Get("X-Ga-Code"); v != "" {
+		t.Errorf("a field of the body became the header X-Ga-Code: %q", v)
+	}
+}
+
+// ---- a second-factor code on the request ----
+
+// codeSource makes a code each time it is asked, and counts how many it made.
+type codeSource struct {
+	mu    sync.Mutex
+	codes []string
+	n     int
+}
+
+func (c *codeSource) Next() (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.n++
+	if len(c.codes) == 0 {
+		return "", errors.New("no code")
+	}
+	code := c.codes[0]
+	if len(c.codes) > 1 {
+		c.codes = c.codes[1:]
+	}
+	return code, nil
+}
+
+func (c *codeSource) count() int { c.mu.Lock(); defer c.mu.Unlock(); return c.n }
+
+func gaRequest(base *url.URL, src *codeSource) Request {
+	r := req(base, "POST", "/management/x")
+	r.SecondFactor = &SecondFactor{Header: "x-ga-code", Code: src.Next}
+	return r
+}
+
+func TestTheSecondFactorCodeIsPutOnTheRequestUnderTheHeaderTheDriverNamed(t *testing.T) {
+	p, base, sn := newProxy(t, http.HandlerFunc(echo))
+	src := &codeSource{codes: []string{"482913"}}
+	if _, err := p.Do(context.Background(), session(), gaRequest(base, src)); err != nil {
+		t.Fatal(err)
+	}
+	if got := sn.last().Header.Get("X-Ga-Code"); got != "482913" {
+		t.Errorf("the site received %q", got)
+	}
+}
+
+func TestOneRequestMakesExactlyOneCodeAndAFollowedRedirectDoesNotMakeAnother(t *testing.T) {
+	p, base, sn := newProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/management/x" {
+			http.Redirect(w, r, "/management/y", http.StatusTemporaryRedirect)
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	src := &codeSource{codes: []string{"111111", "222222"}}
+	r := gaRequest(base, src)
+	r.FollowRedirects = true
+	if _, err := p.Do(context.Background(), session(), r); err != nil {
+		t.Fatal(err)
+	}
+	if src.count() != 1 {
+		t.Errorf("%d codes were made for one request: a code a site is shown twice is a code it may take for a replay, and each wrong one counts", src.count())
+	}
+	if sn.count() != 2 {
+		t.Fatalf("%d requests reached the site", sn.count())
+	}
+	for i, got := range sn.all() {
+		if got.Header.Get("X-Ga-Code") != "111111" {
+			t.Errorf("request %d carried %q", i, got.Header.Get("X-Ga-Code"))
+		}
+	}
+}
+
+// A request that is refused before it is sent makes no code: the code is made at the last moment, for a request that is going out.
+func TestNoCodeIsMadeForARequestThatIsRefused(t *testing.T) {
+	p, base, _ := newProxy(t, http.HandlerFunc(echo))
+	src := &codeSource{codes: []string{"123456"}}
+	for name, mutate := range map[string]func(*Request){
+		"a header the agent may not set": func(r *Request) { r.Headers = map[string]string{"Cookie": "x=1"} },
+		"a path that is not a path":      func(r *Request) { r.Path = "http://evil.example/x" },
+		"a method that is not allowed":   func(r *Request) { r.Method = "TRACE" },
+	} {
+		r := gaRequest(base, src)
+		mutate(&r)
+		if _, err := p.Do(context.Background(), session(), r); err == nil {
+			t.Errorf("%s: the request was not refused", name)
+		}
+	}
+	if src.count() != 0 {
+		t.Errorf("%d codes were made for requests that were never sent", src.count())
+	}
+}
+
+func TestACodeThatCannotBeMadeStopsTheRequestBeforeAnythingIsSent(t *testing.T) {
+	p, base, sn := newProxy(t, http.HandlerFunc(echo))
+	r := gaRequest(base, &codeSource{})
+	_, err := p.Do(context.Background(), session(), r)
+	if err == nil || !errors.Is(err, ErrSecondFactor) {
+		t.Fatalf("%v", err)
+	}
+	if sn.count() != 0 {
+		t.Error("a request went out without the code the site wants")
+	}
+}
+
+// The code is a credential of this one request: a site that repeats what it was sent (an echo, an error page) must not hand it to
+// the agent, in the body, the headers or the error.
+func TestTheCodeIsNeverInWhatComesBack(t *testing.T) {
+	p, base, _ := newProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Echo", r.Header.Get("X-Ga-Code"))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"you_sent": r.Header.Get("X-Ga-Code"), "message": "bad code " + r.Header.Get("X-Ga-Code")})
+	}))
+	src := &codeSource{codes: []string{"738401"}}
+	res, err := p.Do(context.Background(), session(), gaRequest(base, src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Body, "738401") {
+		t.Errorf("the code came back in the body: %s", res.Body)
+	}
+	for k, vs := range res.Headers {
+		for _, v := range vs {
+			if strings.Contains(v, "738401") {
+				t.Errorf("the code came back in the header %s", k)
+			}
+		}
+	}
+	if res.Redactions == 0 {
+		t.Errorf("a removal that happened is reported: %+v", res)
+	}
+}
+
+func TestACodeInATransportErrorIsNotShown(t *testing.T) {
+	p, _, _ := newProxy(t, http.HandlerFunc(echo))
+	dead, _ := url.Parse("http://127.0.0.1:1")
+	src := &codeSource{codes: []string{"905512"}}
+	_, err := p.Do(context.Background(), session(), gaRequest(dead, src))
+	if err == nil || strings.Contains(err.Error(), "905512") {
+		t.Errorf("%v", err)
+	}
+}
+
+func TestARequestWithNoSecondFactorIsExactlyWhatItWas(t *testing.T) {
+	p, base, sn := newProxy(t, http.HandlerFunc(echo))
+	if _, err := p.Do(context.Background(), session(), req(base, "GET", "/api/me")); err != nil {
+		t.Fatal(err)
+	}
+	if v := sn.last().Header.Get("X-Ga-Code"); v != "" {
+		t.Errorf("a code appeared on a request that asked for none: %q", v)
+	}
+}
+
+func TestASecondFactorWithNoHeaderOrNoCodeSourceIsRefused(t *testing.T) {
+	p, base, sn := newProxy(t, http.HandlerFunc(echo))
+	for name, sf := range map[string]*SecondFactor{
+		"no header":                     {Header: "", Code: (&codeSource{codes: []string{"1"}}).Next},
+		"no source":                     {Header: "x-ga-code", Code: nil},
+		"a header that is not a header": {Header: "x ga", Code: (&codeSource{codes: []string{"1"}}).Next},
+		"a header that is a cookie":     {Header: "Cookie", Code: (&codeSource{codes: []string{"1"}}).Next},
+	} {
+		r := req(base, "GET", "/x")
+		r.SecondFactor = sf
+		if _, err := p.Do(context.Background(), session(), r); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	if sn.count() != 0 {
+		t.Error("a request went out")
+	}
+}
+
+// A code that has a line break or a control character in it would end the header it is in: it is never sent.
+func TestACodeThatIsNotPlainDigitsOrLettersIsNotSent(t *testing.T) {
+	p, base, sn := newProxy(t, http.HandlerFunc(echo))
+	for _, bad := range []string{"12\r\nx-evil: 1", "12 34", "", "12\x00", "é12345", strings.Repeat("1", 40)} {
+		src := &codeSource{codes: []string{bad}}
+		if _, err := p.Do(context.Background(), session(), gaRequest(base, src)); err == nil {
+			t.Errorf("%q was sent as a code", bad)
+		}
+	}
+	if sn.count() != 0 {
+		t.Error("a request went out")
+	}
+}
+
+func TestADriverMayNameTheSecondFactorHeaderButNotAHeaderSecurlSetsForItsOwnReasons(t *testing.T) {
+	src := (&codeSource{codes: []string{"123456"}}).Next
+	for _, h := range []string{"x-ga-code", "X-Ga-Code", "x-otp", "X-Auth-Code"} {
+		if securlOwnHeader(h) {
+			t.Errorf("%s is a header a driver may ask for the code to be written into", h)
+		}
+		if _, err := (&SecondFactor{Header: h, Code: src}).codeOf(); err != nil {
+			t.Errorf("%s: %v", h, err)
+		}
+	}
+	for _, h := range []string{"Cookie", "cookie", "Authorization", "Proxy-Authorization", "Host", "Content-Length", "Transfer-Encoding", "Connection", "Upgrade", "TE", "Expect", "Accept-Encoding", "Trailer", "Keep-Alive"} {
+		if !securlOwnHeader(h) {
+			t.Errorf("%s is not named as a header securl sets itself", h)
+		}
+		if _, err := (&SecondFactor{Header: h, Code: src}).codeOf(); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s was accepted as the place for a code: %v", h, err)
+		}
+	}
+}
+
+// A Request value used for two calls makes two codes and each call carries its own: the first one's code never rides on the second.
+func TestTwoCallsWithOneRequestEachCarryTheirOwnCode(t *testing.T) {
+	p, base, sn := newProxy(t, http.HandlerFunc(echo))
+	src := &codeSource{codes: []string{"111111", "222222"}}
+	r := gaRequest(base, src)
+	r.Headers = map[string]string{"X-Note": "same"}
+	for i := 0; i < 2; i++ {
+		if _, err := p.Do(context.Background(), session(), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := sn.all()
+	if len(got) != 2 || got[0].Header.Get("X-Ga-Code") != "111111" || got[1].Header.Get("X-Ga-Code") != "222222" {
+		t.Errorf("the calls carried %q and %q", got[0].Header.Get("X-Ga-Code"), got[1].Header.Get("X-Ga-Code"))
+	}
+	if r.Headers["X-Ga-Code"] != "" || len(r.Headers) != 1 {
+		t.Errorf("the caller's headers were written to: %v", r.Headers)
+	}
+}
+
+// ---- the site refuses the code ----
+
+func TestTheProxyAsksTheDriverWhetherTheSiteRefusedTheCodeAndSaysSoInTheResult(t *testing.T) {
+	p, base, _ := newProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":304009}`)
+	}))
+	var gotStatus int
+	var gotBody string
+	r := gaRequest(base, &codeSource{codes: []string{"123456"}})
+	r.SecondFactor.Refused = func(status int, body []byte) bool {
+		gotStatus, gotBody = status, string(body)
+		return strings.Contains(string(body), "304009")
+	}
+	res, err := p.Do(context.Background(), session(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.CodeRefused || gotStatus != 200 || gotBody != `{"code":304009}` {
+		t.Errorf("refused=%v, the driver was shown %d %q", res.CodeRefused, gotStatus, gotBody)
+	}
+	r2 := gaRequest(base, &codeSource{codes: []string{"123456"}})
+	r2.SecondFactor.Refused = func(int, []byte) bool { return false }
+	if res2, _ := p.Do(context.Background(), session(), r2); res2 == nil || res2.CodeRefused {
+		t.Errorf("a driver that says it was not refused: %+v", res2)
+	}
+}
+
+// The driver is shown what the site really sent, the code included (the driver cannot do anything with it, it is the site's own
+// answer), but never more than the start of it, and the agent is shown none of this.
+func TestTheDriverIsShownOnlyTheStartOfTheAnswer(t *testing.T) {
+	p, base, _ := newProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, strings.Repeat("x", 10000))
+	}))
+	r := gaRequest(base, &codeSource{codes: []string{"123456"}})
+	var n int
+	r.SecondFactor.Refused = func(_ int, body []byte) bool { n = len(body); return false }
+	if _, err := p.Do(context.Background(), session(), r); err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 || n > RefusalBodyBytes {
+		t.Errorf("the driver was shown %d bytes, at most %d", n, RefusalBodyBytes)
+	}
+}
+
+// A request that carries no code is not checked: a site that says no to a request with no code is not refusing a code.
+func TestARequestWithNoCodeIsNeverReportedAsACodeRefused(t *testing.T) {
+	p, base, _ := newProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"code":304009}`) }))
+	res, err := p.Do(context.Background(), session(), req(base, "GET", "/x"))
+	if err != nil || res.CodeRefused {
+		t.Errorf("%v %+v", err, res)
+	}
+}
+
+// Only the final answer counts: a redirect is not a refusal, and the last answer is what the site decided.
+func TestOnlyTheFinalAnswerOfARedirectedRequestIsAskedAbout(t *testing.T) {
+	p, base, _ := newProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/management/x" {
+			http.Redirect(w, r, "/management/y", http.StatusTemporaryRedirect)
+			return
+		}
+		fmt.Fprint(w, "fine")
+	}))
+	r := gaRequest(base, &codeSource{codes: []string{"123456"}})
+	r.FollowRedirects = true
+	var asked int
+	r.SecondFactor.Refused = func(status int, body []byte) bool { asked++; return status == 307 }
+	res, err := p.Do(context.Background(), session(), r)
+	if err != nil || asked != 1 || res.CodeRefused {
+		t.Errorf("asked %d times, refused=%v, %v", asked, res != nil && res.CodeRefused, err)
 	}
 }

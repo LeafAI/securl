@@ -107,6 +107,45 @@ Rules that keep a private driver inside securl's model:
   `driver.ErrUnreachable` so that securl can tell what went wrong.
 - A driver that cannot ask the site (a refused connection) returns `driver.Unreachable(err)` from `Probe`, so a good session is kept.
 
+### A site that wants a code on its requests, and a login field of its own
+
+Two things a driver may ask securl for, each by implementing one more interface:
+
+- **`driver.LoginExtras`** adds fields to the login round beside the username and the password (a salt that is typed with them). They
+  are asked on the same page, always as secrets, saved with the password only when the person chooses to remember credentials, and
+  handed back in the same round on a later login. A name is lower-case letters, digits and `_`, starts with a letter, and is not one
+  securl uses (`driver.ReservedFieldNames()`).
+- **`driver.SecondFactor`** is for a site that checks a one-time code in a header of its requests, not only at login. The driver says
+  which header and how many digits, and how to tell that the site refused a code. securl makes the code from the TOTP seed the person
+  chose to save, puts it on **every** request while their approval is in force, and scrubs it from what comes back. The driver never
+  sees the seed or a code, and an agent cannot send one (`X-Ga-Code` is refused). A code the site refuses is not tried again and again:
+  a site that locks an account after a few wrong ones would lock it, so nothing more is sent with a code until the person approves
+  again.
+
+```go-extra
+package admin
+
+import (
+	"strings"
+
+	"github.com/LeafAI/securl/driver"
+)
+
+// asked for beside the username and the password
+func (admin) LoginExtraFields() []driver.Field { return []driver.Field{{Name: "salt", Label: "Salt"}} }
+
+// the header the site reads the code in, and how long the code is
+func (admin) SecondFactorHeader() (string, int) { return "x-ga-code", 6 }
+
+// how this site says "that code is wrong": its own business code, here, in the start of the answer
+func (admin) CodeRefused(status int, body []byte) bool { return strings.Contains(string(body), `"code":304009`) }
+
+var (
+	_ driver.LoginExtras  = admin{}
+	_ driver.SecondFactor = admin{}
+)
+```
+
 The `driver` package is **experimental**: it follows securl's internal interface and may change with it. Pin the securl commit your
 driver was written against in its README.
 

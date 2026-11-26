@@ -205,7 +205,7 @@ Input
   "method": {"type":"string","description":"GET, HEAD, POST, PUT, PATCH, DELETE or OPTIONS."},
   "path":   {"type":"string","description":"Absolute path starting with /. No query, no host, no fragment, no .. segment."},
   "query":  {"type":"object","description":"Each name maps to a string or a list of strings."},
-  "headers":{"type":"object","description":"Ordinary headers. Cookie, Authorization, Host, Content-Length, Transfer-Encoding, Connection, Upgrade, TE, Expect, Accept-Encoding, Trailer, Keep-Alive and any header the session itself sets are refused."},
+  "headers":{"type":"object","description":"Ordinary headers. Cookie, Authorization, X-Ga-Code, Host, Content-Length, Transfer-Encoding, Connection, Upgrade, TE, Expect, Accept-Encoding, Trailer, Keep-Alive and any header the session itself sets are refused."},
   "json":   {"description":"A JSON body (any JSON value; large integers keep their exact text)."},
   "form":   {"type":"object","description":"A form-encoded body."},
   "text":   {"type":"string"}, "base64": {"type":"string","description":"A binary body, standard base64."},
@@ -236,7 +236,22 @@ headers. A cookie the site rotates is kept for the next call (and stored in the 
 it; the layers that do not depend on the scrubber are that the agent cannot send credentials, can only reach the
 session's own site (an absolute path on that origin), and never follows a redirect off the site or down from https.
 
-Errors: `vault_locked`/`vault_not_initialized`, `no_session`, `host_not_allowed`, `request_not_allowed` (Archery, see above), `invalid_argument` (the refusals above,
+**A one-time code on every request (a site whose driver asks for it).** Some sites check the code of an authenticator in a header of
+their calls, not only at login (an admin console that checks it on the calls that matter and ignores it on the others). For such a
+site securl puts the current code on **every** request, so nothing about the code is the agent's to know or to decide: it does not say
+which calls need one. The code is made from the TOTP seed the person chose to save (**Remember TOTP**) with their credentials, at the
+last moment, for the one request that is going out (a request refused first makes none, and a followed redirect does not make
+another), and is scrubbed from what the site answers. It is made only while the person's approval is in force. The agent cannot send
+the header itself (`X-Ga-Code` is refused). The audit log says a request carried a code (`second_factor`), never the code.
+- **No seed was saved**: `second_factor_required`, with nothing sent. Only the person can fix it: `session_open` with
+  `manage_credentials=true`, ticking Remember credentials and Remember TOTP and giving the authenticator's setup secret.
+- **The approval ran out**: nothing is sent, and the answer is the usual one for an expired grant (`session_expired`), which the
+  person answers on the page that already exists for it (`daily_approval`); there is no new page and no new question.
+- **The site refused the code**: that request's answer is returned as it is, and from then on `second_factor_refused` is the answer, with
+  nothing sent, until the person approves again. A site that locks an account after a few wrong codes would lock this one, so securl
+  does not try again and again; a new approval is a new grant and makes it possible to try once more.
+
+Errors: `second_factor_required`, `second_factor_refused`, `vault_locked`/`vault_not_initialized`, `no_session`, `host_not_allowed`, `request_not_allowed` (Archery, see above), `invalid_argument` (the refusals above,
 before anything is sent), `session_expired`, `site_unreachable` (the message never contains the URL or a credential).
 Each call is audited as `request`: method, path (never the query), status, size, host.
 

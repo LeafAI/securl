@@ -429,6 +429,8 @@ func TestEveryFieldTheSkillNamesIsOneTheToolsTake(t *testing.T) {
 		"allowed_signers": true,
 		// Error codes of closing sessions: held to the source by TestTheErrorCodesTheSkillNamesAreOnesTheServerSends.
 		"close_pending": true, "bad_confirmation": true,
+		// Error codes of the request tool's one-time code: held to the source by the same test.
+		"second_factor_required": true, "second_factor_refused": true,
 	}
 	skill := readSkill(t)
 	for _, m := range regexp.MustCompile("`([a-z]+(?:_[a-z]+)+)`").FindAllStringSubmatch(skill, -1) {
