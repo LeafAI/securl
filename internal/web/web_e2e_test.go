@@ -42,6 +42,12 @@ func newRigWithFactor(t *testing.T, mode string, fields []web.Field, f api.Facto
 
 // newRigFull also encrypts the link parameters under the unlock codes (the long-period TOTP), if given.
 func newRigFull(t *testing.T, mode string, fields []web.Field, f api.Factor, linkCodes []string, linkDigits int) *rig {
+	return newRigSite(t, "gitlab.example", mode, fields, f, linkCodes, linkDigits)
+}
+
+// newRigSite is newRigFull for a given site string. The managed steps (remembered credentials) only open for a site that says which
+// address and which grant duration the person is agreeing to, so a test of them needs one.
+func newRigSite(t *testing.T, siteText, mode string, fields []web.Field, f api.Factor, linkCodes []string, linkDigits int) *rig {
 	t.Helper()
 	browsertest.Require(t)
 	k, err := keyring.NewMemoryPool(8, time.Hour).Acquire()
@@ -57,14 +63,14 @@ func newRigFull(t *testing.T, mode string, fields []web.Field, f api.Factor, lin
 		t.Fatal(err)
 	}
 	t.Cleanup(srv.Close)
-	round := srv.NewRoundFor("gitlab.example", mode, 1)
+	round := srv.NewRoundFor(siteText, mode, 1)
 	pub, _ := k.PublicKeyBinary()
 	dir := t.TempDir()
 	if err := web.WriteTo(dir); err != nil {
 		t.Fatal(err)
 	}
 	link := web.Link("file://"+dir+"/index.html", web.Round{
-		Site: "gitlab.example", Mode: mode, N: 1, APIBase: fmt.Sprintf("http://127.0.0.1:%d/%s", port, round.Token),
+		Site: siteText, Mode: mode, N: 1, APIBase: fmt.Sprintf("http://127.0.0.1:%d/%s", port, round.Token),
 		PublicKey: pub, Fingerprint: k.Fingerprint(), Password: round.Password(), FactorDigits: srv.FactorDigits(),
 		LinkCodes: linkCodes, LinkDigits: linkDigits, Fields: fields,
 	})

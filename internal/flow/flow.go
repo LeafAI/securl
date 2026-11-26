@@ -540,6 +540,42 @@ func AuthorizationSite(base *url.URL, ttl time.Duration, origins ...*url.URL) st
 	return display + " | Grant: " + ttl.String()
 }
 
+// managedStep says whether a step is one of those that sign in or approve with remembered credentials. Each shows the person the
+// address and how long the grant lasts, bound into the round, and the page refuses it without them.
+func managedStep(mode string) bool {
+	switch mode {
+	case "daily_approval", "credential_setup", "credential_replace", "credential_totp", web.ModeSetupExtras, web.ModeReplaceExtras:
+		return true
+	}
+	return false
+}
+
+// linkFields are the fields a step's link carries: none for a step with a form of its own on the page. For "custom" they are the
+// driver's, as it gave them. For the two steps that add a driver's fields to a sign-in they are the driver's extra fields only: the
+// username, the password and the choices about remembering are the page's own and are not in the link. They are always secret,
+// whatever the driver said, and never have an image: the page shows them as password inputs and refuses a link that says otherwise.
+func linkFields(mode string, fields []site.Field) []web.Field {
+	if !web.CarriesFields(mode) {
+		return nil
+	}
+	var cf []web.Field
+	for _, x := range fields {
+		if mode != "custom" && ownField(x.Name) {
+			continue
+		}
+		f := web.Field{Name: x.Name, Label: x.Label, Secret: x.Secret, Image: x.Image}
+		if mode != "custom" {
+			f.Secret, f.Image = true, ""
+		}
+		cf = append(cf, f)
+	}
+	return cf
+}
+
+// ownField says whether a field is one the sign-in page has of its own: the username, the password and the choices about
+// remembering, and the other names securl uses. An extras step's link never carries one.
+func ownField(name string) bool { return site.ReservedFieldNames[name] }
+
 // Ask implements site.Asker: it runs one human round.
 func (f *Flow) Ask(ctx context.Context, mode string, fields []site.Field) (site.Credentials, error) {
 	f.set(Snapshot{Phase: "starting", Mode: mode, Round: f.rounds + 1})
@@ -558,7 +594,7 @@ func (f *Flow) Ask(ctx context.Context, mode string, fields []site.Field) (site.
 	}
 	f.rounds++
 	displaySite := f.Base.Host
-	if mode == "daily_approval" || mode == "credential_setup" || mode == "credential_replace" || mode == "credential_totp" {
+	if managedStep(mode) {
 		displaySite = AuthorizationSite(f.Base, f.m.cfg.AuthorizationTTL, f.CredentialOrigin)
 	}
 	round := f.srv.NewRoundAt(web.BoundSite(displaySite), mode, f.rounds, time.Now())
@@ -568,12 +604,7 @@ func (f *Flow) Ask(ctx context.Context, mode string, fields []site.Field) (site.
 	if err != nil {
 		return nil, err
 	}
-	var cf []web.Field
-	if mode == "custom" {
-		for _, x := range fields {
-			cf = append(cf, web.Field{Name: x.Name, Label: x.Label, Secret: x.Secret, Image: x.Image})
-		}
-	}
+	cf := linkFields(mode, fields)
 	expires := time.Now().Add(f.m.cfg.TTL)
 	send := func(note string) error {
 		wr := web.Round{
@@ -748,7 +779,9 @@ func message(f *Flow, mode string, n int, link, fpr string, expires time.Time, n
 	if f.m != nil && f.m.cfg.AuthorizationTTL > 0 {
 		ttl = f.m.cfg.AuthorizationTTL
 	}
-	step := map[string]string{"login": "username & password", "totp": "two-factor code", "custom": "additional information", "daily_approval": "approve agent access for " + ttl.String() + ", or update or forget credentials", "credential_setup": "sign in; optionally remember credentials and authorize access for " + ttl.String(), "credential_replace": "replace saved credentials and authorize access for " + ttl.String(), "credential_totp": "enter the upstream TOTP setup secret or a one-time code to complete remembered login"}[mode]
+	step := map[string]string{"login": "username & password", "totp": "two-factor code", "custom": "additional information", "daily_approval": "approve agent access for " + ttl.String() + ", or update or forget credentials", "credential_setup": "sign in; optionally remember credentials and authorize access for " + ttl.String(), "credential_replace": "replace saved credentials and authorize access for " + ttl.String(), "credential_totp": "enter the upstream TOTP setup secret or a one-time code to complete remembered login",
+		web.ModeSetupExtras:   "sign in with the extra field the site asks for; optionally remember credentials and authorize access for " + ttl.String(),
+		web.ModeReplaceExtras: "replace saved credentials, with the extra field the site asks for, and authorize access for " + ttl.String()}[mode]
 	if step == "" {
 		step = mode
 	}
