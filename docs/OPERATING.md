@@ -504,8 +504,13 @@ challenges still require a person unless an applicable TOTP seed is saved. Gener
 configuration changes invalidate the old credential binding; use the management page to replace it. Only HTTPS sites are supported. The approval window is measured from explicit consent, not a calendar day and not an idle timeout.
 Set security.credential_authorization_ttl in config.yaml (default 24h, e.g. 8h or 30m). Restart securl to apply changes; existing grants retain their approved duration until expiration or revocation. Each exact site root has its own grant.
 
+A driver that asks for a field beside the username and the password (a private driver for an admin console that wants a salt typed
+with the credentials, for example) is asked on the same page, in the same envelope, and the value is saved with the password only
+when you select **Remember credentials**; it is shown as a secret and a password manager is told not to fill it. If the driver later
+asks for different fields, the saved credentials are not used and you are asked again (replace them from the management page).
+
 Publish the updated static page alongside the binary: older pages cannot explicitly consent to seed storage.
-An updated static page is required for the credential_setup, credential_replace, credential_totp and daily_approval modes. DingTalk is preferred; agent-delivered links
+An updated static page is required for the credential_setup, credential_replace, credential_totp and daily_approval modes, and for credential_setup_x and credential_replace_x (page version 3), which a driver that asks for a field beside the username and the password (a salt, say) uses: a hosted copy of the page that is older than the binary does not know them and refuses the link, so publish the page when you update securl. DingTalk is preferred; agent-delivered links
 require an independently held securl link or seal TOTP factor. On bad upstream credentials, the owner should
 replace the saved record rather than repeatedly retry. Vault restart/unlock rules and Archery SQL workflow
 approval are unaffected. Confirmed session_close revokes the grant without forgetting the credentials.
