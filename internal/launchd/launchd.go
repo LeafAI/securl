@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -41,6 +42,11 @@ type Spec struct {
 	// Wait is how a retry waits (time.Sleep when nil); a test gives it one that does not.
 	Wait func(time.Duration)
 }
+
+// throttleSeconds is the least time launchd lets pass between two starts of the daemon. With a restart whatever the way it stopped, a
+// daemon that exits at once (a second one that finds the first running, a configuration it cannot read) is tried again this often
+// and not faster.
+const throttleSeconds = 30
 
 // maxBootstrapTries bounds how often a busy label is tried again, and bootstrapPause is the wait between two tries.
 const (
@@ -88,11 +94,13 @@ func (s Spec) Plist() (string, error) {
 	// cannot name that file: launchd expands neither "~" nor $HOME, and the plist is one file for every user.
 	b.WriteString("\t\t<string>" + esc(s.Binary) + "</string>\n\t\t<string>daemon</string>\n\t\t<string>-log</string>\n\t\t<string>default</string>\n\t</array>\n")
 	b.WriteString("\t<key>RunAtLoad</key>\n\t<true/>\n")
-	// Started again after a crash, not after a clean stop: `daemon uninstall` stops it with SIGTERM, which is a clean exit, and
-	// a second daemon that finds the first one running exits with an error that must not turn into a loop (the throttle below
-	// is the limit if it ever does).
-	b.WriteString("\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<false/>\n\t</dict>\n")
-	b.WriteString("\t<key>ThrottleInterval</key>\n\t<integer>30</integer>\n")
+	// Started again whatever the way it stopped. The daemon answers SIGTERM (kill, pkill, a task manager) by stopping in order and
+	// exiting 0, and a restart "only after a failure" (KeepAlive/SuccessfulExit false) takes that for a stop that was meant: launchd
+	// left a killed daemon dead until the next login. `daemon uninstall` and an upgrade do not rely on the exit: they take the agent
+	// out of launchd with bootout, and launchd does not start what it no longer has. A daemon that exits at once, again and again,
+	// is held to one start in ThrottleInterval seconds, so it is a slow retry and not a loop.
+	b.WriteString("\t<key>KeepAlive</key>\n\t<true/>\n")
+	b.WriteString("\t<key>ThrottleInterval</key>\n\t<integer>" + strconv.Itoa(throttleSeconds) + "</integer>\n")
 	b.WriteString("\t<key>ProcessType</key>\n\t<string>Background</string>\n")
 	b.WriteString("</dict>\n</plist>\n")
 	return b.String(), nil

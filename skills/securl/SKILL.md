@@ -78,6 +78,8 @@ sudo installer -pkg securl_macos.pkg -target /       # the user types their pass
 - If a command prints `the daemon is version X and this command is Y; they may answer differently`, the daemon is an older
   process than the binary on disk (it was started before an update and never restarted). Restart it:
   `launchctl kickstart -k gui/$(id -u)/com.leafai.securl`, then `securl unlock`.
+- If the daemon is killed (`pkill securl`), launchd starts it again within about 30 seconds, locked: tell the user to run
+  `securl unlock`. It stays stopped only after `sudo securl daemon uninstall`.
 
 ### 1b. Go 1.21 or newer: go install
 
