@@ -74,6 +74,8 @@ securl version
   and you type the passphrase on its page. Once you unlock it, every process of your account can use your sessions through the
   daemon (never a credential) until it locks again. `vault.idle_lock` sets how long that is (`securl config set vault.idle_lock 30m`);
   without it the vault stays open until the daemon stops. The daemon's own log is `~/Library/Logs/securl-daemon.log`.
+- **If the daemon is killed** (`pkill securl`, a task manager, a crash), launchd starts it again within about 30 seconds, with its
+  vault locked: `securl unlock` opens it. To stop it for good, use `sudo securl daemon uninstall`.
 - To remove securl: `sudo securl daemon uninstall` (no user gets a daemon at login any more, and yours is stopped), then
   `sudo rm /usr/local/bin/securl` and `sudo pkgutil --forget com.leafai.securl`. Its configuration, vault and audit log are in
   `~/Library/Application Support/securl/` and are yours to keep or delete. A daemon that another user is running stops when they log out.

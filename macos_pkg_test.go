@@ -718,3 +718,104 @@ func TestThePostinstallSetsItsOwnPathBeforeItRunsAnything(t *testing.T) {
 		t.Error("the binary that is run is the one the package installed, by its absolute path")
 	}
 }
+
+// A daemon that was killed is started again, and the documents say so, in the words that are true: launchd starts it again whatever
+// the way it stopped (the daemon stops in order and exits 0 on SIGTERM, and a restart only after a failure would leave it dead), and
+// no more than once in 30 seconds. They must not say the opposite: that a stop that was clean is not followed by a start.
+//
+// Each document is checked on the sentence that says it, not on the whole file: "securl unlock" and "sudo securl daemon uninstall"
+// are in every one of them for other reasons, and would let a deleted sentence go unnoticed.
+func TestTheDocumentsSayThatAKilledDaemonIsStartedAgain(t *testing.T) {
+	flatOf := func(doc string) string {
+		b, err := os.ReadFile(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(strings.Fields(string(b)), " ")
+	}
+	paragraph := func(doc, start string) string {
+		b, err := os.ReadFile(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, ok := listItemStarting(string(b), start)
+		if !ok {
+			t.Errorf("%s has no paragraph that starts %q", doc, start)
+		}
+		return got
+	}
+	check := func(doc, para string, wants ...string) {
+		for _, want := range wants {
+			if !strings.Contains(para, want) {
+				t.Errorf("%s: the sentence about a killed daemon does not say %q:\n%s", doc, want, para)
+			}
+		}
+	}
+	check("docs/OPERATING.md", paragraph("docs/OPERATING.md", "launchd starts it again whatever the way it stopped"),
+		"once in 30 seconds", "`kill` or `pkill`", "exits 0", "is started again by launchd, **locked**", "`securl unlock` opens it",
+		"`sudo securl daemon uninstall`", "`bootout`", "launchd does not start what it no longer has")
+	check("README.md", paragraph("README.md", "**If the daemon is killed**"),
+		"(`pkill securl`", "launchd starts it again within about 30 seconds", "vault locked", "`securl unlock` opens it", "`sudo securl daemon uninstall`")
+	check("skills/securl/SKILL.md", paragraph("skills/securl/SKILL.md", "If the daemon is killed"),
+		"(`pkill securl`)", "launchd starts it again within about 30 seconds", "locked", "run `securl unlock`", "only after `sudo securl daemon uninstall`")
+	for _, doc := range []string{"README.md", "docs/OPERATING.md", "skills/securl/SKILL.md"} {
+		flat := flatOf(doc)
+		for _, stale := range []string{"restarts it only if it **fails**", "not after a clean stop", "only after a failure"} {
+			if strings.Contains(flat, stale) {
+				t.Errorf("%s still says %q, which is how the agent used to be and left a killed daemon dead", doc, stale)
+			}
+		}
+	}
+}
+
+// listItemStarting returns, on one line, the text of the list item that has start in it (its words as one space apart, wherever the
+// document wrapped them), from the line where the item begins to the end of it: the next blank line or the next "- " item. It is what
+// one bullet of a document says, and not the rest of the file.
+func listItemStarting(doc, start string) (string, bool) {
+	lines := strings.Split(doc, "\n")
+	words := func(ls []string) string { return strings.Join(strings.Fields(strings.Join(ls, " ")), " ") }
+	for i := 0; i < len(lines); i++ {
+		if !strings.HasPrefix(strings.TrimLeft(lines[i], " "), "- ") {
+			continue // an item begins at a "- " line
+		}
+		end := i + 1
+		for end < len(lines) && strings.TrimSpace(lines[end]) != "" && !strings.HasPrefix(strings.TrimLeft(lines[end], " "), "- ") {
+			end++
+		}
+		if item := words(lines[i:end]); strings.Contains(item, start) {
+			return item, true
+		}
+	}
+	return "", false
+}
+
+// The helper that cuts a bullet out of a document must cut one bullet: from its first line to the end of it, with the words of a
+// sentence that was wrapped over two lines put back together, and nothing of the next bullet or of the paragraph after.
+func TestListItemStartingCutsOneBullet(t *testing.T) {
+	doc := "intro\n- first one\n  goes on here.\n- the target sentence that is\n  wrapped, and ends here.\n- the next bullet\n\nafter the list\n"
+	got, ok := listItemStarting(doc, "the target sentence")
+	if !ok || got != "- the target sentence that is wrapped, and ends here." {
+		t.Errorf("got %q %v", got, ok)
+	}
+	if got, ok := listItemStarting(doc, "first one"); !ok || got != "- first one goes on here." {
+		t.Errorf("first: %q %v", got, ok)
+	}
+	if got, ok := listItemStarting(doc, "the next bullet"); !ok || got != "- the next bullet" {
+		t.Errorf("a bullet before a blank line: %q %v", got, ok)
+	}
+	// a line that is not in a list (a heading, a paragraph) is not an item, even if the words are in it: a document that says them
+	// elsewhere must not stand in for the bullet that is missing
+	if got, ok := listItemStarting("a paragraph that says the target sentence\n\n- another bullet\n", "the target sentence"); ok {
+		t.Errorf("a paragraph outside a list was taken for an item: %q", got)
+	}
+	if got, ok := listItemStarting(doc, "no such words"); ok || got != "" {
+		t.Errorf("absent: %q %v", got, ok)
+	}
+	if got, ok := listItemStarting("- only one", "only one"); !ok || got != "- only one" {
+		t.Errorf("last line of a file: %q %v", got, ok)
+	}
+	// a sentence that starts at the end of one line and runs on to the next is found by its words, wherever the line broke
+	if got, ok := listItemStarting("- If the daemon is\n  killed (x), it comes back.\n", "If the daemon is killed"); !ok || got != "- If the daemon is killed (x), it comes back." {
+		t.Errorf("a start wrapped over two lines: %q %v", got, ok)
+	}
+}

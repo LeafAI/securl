@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -67,7 +69,7 @@ func spec(t *testing.T) Spec {
 
 func agentPath(s Spec) string { return filepath.Join(s.Dir, Label+".plist") }
 
-func TestThePlistRunsTheDaemonAtLoginAndRestartsItOnlyAfterAFailure(t *testing.T) {
+func TestThePlistRunsTheDaemonAtLoginAndRestartsItWhateverTheWayItStopped(t *testing.T) {
 	p, err := spec(t).Plist()
 	if err != nil {
 		t.Fatal(err)
@@ -77,18 +79,40 @@ func TestThePlistRunsTheDaemonAtLoginAndRestartsItOnlyAfterAFailure(t *testing.T
 		"<string>/usr/local/bin/securl</string>", "<string>daemon</string>",
 		// the log is the daemon's to open, from its own HOME: the word, not a path, because launchd expands neither "~" nor $HOME
 		"<string>-log</string>", "<string>default</string>",
-		"<key>RunAtLoad</key>", "<key>KeepAlive</key>", "<key>SuccessfulExit</key>", "<key>ThrottleInterval</key>",
+		"<key>RunAtLoad</key>", "<key>KeepAlive</key>", "<key>ThrottleInterval</key>",
 		"<key>ProcessType</key>", "<string>Background</string>",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("the plist lacks %s:\n%s", want, p)
 		}
 	}
-	// KeepAlive must be conditional. A daemon that stops cleanly (SIGTERM from `daemon uninstall`, or the exit of a second
-	// start that found one running) is not started again at once; one that crashes is.
+	// KeepAlive is unconditional. The daemon answers SIGTERM (what pkill and kill send) by stopping in order and exiting 0, and
+	// with "restart only after a failure" (SuccessfulExit false) launchd takes that for a stop that was meant and does not start it
+	// again, so a daemon that was killed stayed dead until the next login. `securl daemon uninstall` does not rely on the exit: it
+	// takes the agent out of launchd with bootout, and launchd does not start what it no longer has.
 	flat := strings.Join(strings.Fields(p), "")
-	if !strings.Contains(flat, "<key>SuccessfulExit</key><false/>") {
-		t.Errorf("KeepAlive restarts only after a failure (SuccessfulExit false):\n%s", p)
+	if !strings.Contains(flat, "<key>KeepAlive</key><true/>") {
+		t.Errorf("KeepAlive must be true, so that a daemon that was killed is started again:\n%s", p)
+	}
+	if strings.Contains(p, "SuccessfulExit") {
+		t.Errorf("KeepAlive must not depend on how the daemon exited:\n%s", p)
+	}
+}
+
+// What stops a daemon that exits at once, over and over (a second one that finds the first running, a config it cannot read), from
+// being a loop that starts it as fast as launchd can: a pause between two starts, and not a short one.
+func TestThePlistPutsAPauseBetweenTwoStartsOfTheDaemon(t *testing.T) {
+	p, err := spec(t).Plist()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`<key>ThrottleInterval</key>\s*<integer>(\d+)</integer>`).FindStringSubmatch(p)
+	if m == nil {
+		t.Fatalf("no ThrottleInterval:\n%s", p)
+	}
+	n, _ := strconv.Atoi(m[1])
+	if n < 10 || n > 300 {
+		t.Errorf("ThrottleInterval is %d seconds: unconditional KeepAlive needs a real pause (10 to 300), or a daemon that cannot start is a busy loop", n)
 	}
 }
 
@@ -427,5 +451,30 @@ func TestInstallDoesNotRetryAnAnswerThatTimeWillNotChange(t *testing.T) {
 	}
 	if n := strings.Count(ctl.names(), "bootstrap"); n != 1 {
 		t.Errorf("%d bootstraps, want 1", n)
+	}
+}
+
+// A machine that has the package of before has the old plist, which restarts only after a failure. Installing over it, which is what
+// the installer's last step and `securl daemon install` do, must leave the new one, and not leave both ways of restarting in it.
+func TestInstallingOverAnOldPlistLeavesTheOneThatRestartsAKilledDaemon(t *testing.T) {
+	s := spec(t)
+	old := `<?xml version="1.0" encoding="UTF-8"?>
+<!-- ` + marker + ` -->
+<plist version="1.0"><dict><key>Label</key><string>com.leafai.securl</string>
+<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict></dict></plist>
+`
+	if err := os.WriteFile(agentPath(s), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(s, &fakeCtl{}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(agentPath(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	flat := strings.Join(strings.Fields(string(b)), "")
+	if !strings.Contains(flat, "<key>KeepAlive</key><true/>") || strings.Contains(string(b), "SuccessfulExit") {
+		t.Errorf("the old plist was not replaced by the new one:\n%s", b)
 	}
 }

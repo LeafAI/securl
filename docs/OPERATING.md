@@ -178,8 +178,10 @@ sudo securl daemon uninstall          # removes the plist and stops the daemon o
 - The plist names **no user and no path under anyone's home**: it is one file for everybody, and launchd expands neither `~` nor
   `$HOME` in it. It runs `/usr/local/bin/securl daemon -log default` by an absolute path, with no shell and nothing secret in it or in
   its environment. `-log default` makes the daemon open `~/Library/Logs/securl-daemon.log` of the user it runs as (mode 0600), and its
-  configuration is found from that user's own `HOME`. launchd restarts it only if it **fails** (not after a clean stop), and not
-  more often than every 30 seconds.
+  configuration is found from that user's own `HOME`. launchd starts it again whatever the way it stopped, and not more than
+  once in 30 seconds. A daemon that is killed (`kill` or `pkill`) stops in order, exits 0, and is started again by launchd, **locked**:
+  `securl unlock` opens it. To stop it for good, take the agent out of launchd with `sudo securl daemon uninstall` (that is `bootout`:
+  launchd does not start what it no longer has); `launchctl bootout gui/$(id -u)/com.leafai.securl` does it for you alone, until your next login.
 - Every Mac this is installed on gets a daemon for every user who logs in. Each starts **locked**: `securl unlock` opens it. Without
   `vault.idle_lock` an unlocked daemon stays open until it stops, which is why it is the setting to look at first.
 - The package does not ask for the passphrase and no script of it ever sees one: the daemon is running and empty, and the vault is
