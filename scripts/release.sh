@@ -17,6 +17,13 @@ if ! [[ "$version" =~ ^nightly-[0-9]{8}-[0-9a-f]{7,40}$ ]]; then
   exit 2
 fi
 
+# What is published is built from this repository alone. A build with login drivers from other repositories (docs/DRIVERS.md) is
+# for the one who made it, and is never offered to anybody as the official build.
+if [ -n "${SECURL_DRIVERS:-}" ]; then
+  echo "release.sh: SECURL_DRIVERS is set; the official build holds no drivers from other repositories (build them yourself with make)" >&2
+  exit 2
+fi
+
 for tool in go tar zip; do
   command -v "$tool" >/dev/null 2>&1 || { echo "release.sh: $tool is required" >&2; exit 2; }
 done

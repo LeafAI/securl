@@ -16,6 +16,13 @@ tag="nightly"
 
 # Everything that can be wrong with the input is found before anything is deleted: a failure after the old release is
 # gone leaves people with no download at all.
+# What is published is built from this repository alone. A build with login drivers from other repositories (docs/DRIVERS.md) is
+# for the one who made it, and is never offered to anybody as the official build.
+if [ -n "${SECURL_DRIVERS:-}" ]; then
+  echo "publish-nightly.sh: SECURL_DRIVERS is set; the official build holds no drivers from other repositories (build them yourself with make)" >&2
+  exit 2
+fi
+
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "publish-nightly.sh: commit must be a full 40-character SHA, got '$commit'" >&2; exit 2; }
 [[ "$version" =~ ^nightly-[0-9]{8}-[0-9a-f]{7,40}$ ]] || { echo "publish-nightly.sh: bad version '$version'" >&2; exit 2; }
 [[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || { echo "publish-nightly.sh: bad repository '$repo'" >&2; exit 2; }
