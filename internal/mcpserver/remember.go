@@ -49,6 +49,7 @@ func (d rememberedDriver) RememberScope() (string, *url.URL) {
 type setupAsker struct {
 	human      site.Asker
 	mode       string
+	extras     []site.Field // what the driver declared (site.LoginExtras), asked for with the username and the password
 	record     remember.Record
 	consent    bool
 	gotLogin   bool
@@ -82,28 +83,47 @@ func rememberedTOTP(values site.Credentials, credentialsConsent bool) ([]byte, e
 	return seed, nil
 }
 
+// replacing says whether this is the step that replaces saved credentials, with or without the driver's extra fields. Replacing is a
+// choice to save the new credentials already, so it needs no "remember" tick.
+func (a *setupAsker) replacing() bool {
+	return a.mode == "credential_replace" || a.mode == web.ModeReplaceExtras
+}
+
 func (a *setupAsker) Ask(ctx context.Context, mode string, fields []site.Field) (site.Credentials, error) {
-	if login, challenge := remember.LoginChallenge(mode, fields); login {
+	if login, challenge := remember.LoginChallengeWith(mode, fields, a.extras); login {
 		if a.gotLogin {
 			return nil, errors.New("unexpected repeated login challenge")
 		}
 		a.gotLogin = true
-		values, err := a.human.Ask(ctx, a.mode, []site.Field{{Name: "username"}, {Name: "password", Secret: true}, {Name: "remember"}, {Name: "remember_totp"}, {Name: "totp_secret", Secret: true}})
+		values, err := a.human.Ask(ctx, a.mode, append([]site.Field{{Name: "username"}, {Name: "password", Secret: true}, {Name: "remember"}, {Name: "remember_totp"}, {Name: "totp_secret", Secret: true}}, a.extras...))
 		if err != nil {
 			return nil, err
 		}
 		if values["username"] == "" || values["password"] == "" {
 			return nil, site.ErrBadCredentials
 		}
-		a.consent = a.mode == "credential_replace" || values["remember"] == "yes"
+		extraValues := map[string]string{}
+		for _, f := range a.extras {
+			if values[f.Name] == "" {
+				return nil, site.ErrBadCredentials
+			}
+			extraValues[f.Name] = values[f.Name]
+		}
+		a.consent = a.replacing() || values["remember"] == "yes"
 		seed, err := rememberedTOTP(values, a.consent)
 		if err != nil {
 			return nil, err
 		}
 		a.record.Username, a.record.Password = values["username"], values["password"]
+		if len(extraValues) > 0 {
+			a.record.Extras = extraValues
+		}
 		a.approvedAt = time.Now()
 		a.record.Secret = seed
 		out := site.Credentials{"username": a.record.Username, "password": a.record.Password}
+		for name, v := range extraValues {
+			out[name] = v
+		}
 		if len(challenge) > 0 {
 			answer, err := a.human.Ask(ctx, "custom", challenge)
 			if err != nil {
@@ -148,12 +168,21 @@ func (d rememberedDriver) setup(ctx context.Context, base *url.URL, ask site.Ask
 	if !d.s.enrollmentAllowed(base, d.Driver) {
 		return nil, errors.New("credential setup requires HTTPS and independently verified human delivery")
 	}
-	mode := "credential_setup"
-	if old != nil || removed {
-		mode = "credential_replace"
+	// BindingOf refuses a driver whose extra fields are not allowed, and one that does not take part in remembered credentials, so
+	// nothing is asked of anyone for either; Extras then cannot fail.
+	binding, err := remember.BindingOf(d.Driver)
+	if err != nil {
+		return nil, errors.New("this driver cannot take part in remembered credentials: a login field it asks for is not allowed")
 	}
-	binding, _, _ := remember.Scope(d.Driver)
-	a := &setupAsker{human: ask, mode: mode, record: remember.Record{Site: d.Name(), Binding: binding}}
+	extras, _ := remember.Extras(d.Driver)
+	askMode := "credential_setup"
+	if old != nil || removed {
+		askMode = "credential_replace"
+	}
+	if len(extras) > 0 {
+		askMode += "_x"
+	}
+	a := &setupAsker{human: ask, mode: askMode, extras: extras, record: remember.Record{Site: d.Name(), Binding: binding}}
 	defer func() { clear(a.record.Secret) }()
 	sess, err := remember.Run(ctx, d.Driver, base, a, hc)
 	if err != nil {

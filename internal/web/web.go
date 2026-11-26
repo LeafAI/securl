@@ -50,7 +50,21 @@ func Checksums() []string {
 	return out
 }
 
-// Field is a custom form field carried in the link (mode "custom").
+// CarriesFields says whether a step's link holds a list of fields: "custom" always has, and the two steps that add a driver's own
+// fields (a salt, say) to the sign-in of remembered credentials. Every other step has a fixed list on the page, and a link that
+// carries one is refused by the page.
+func CarriesFields(mode string) bool {
+	return mode == "custom" || mode == ModeSetupExtras || mode == ModeReplaceExtras
+}
+
+// The steps that sign in with remembered credentials and also ask for the fields a driver declared (site.LoginExtras). They are the
+// steps credential_setup and credential_replace with those fields added after the ones the step already has.
+const (
+	ModeSetupExtras   = "credential_setup_x"
+	ModeReplaceExtras = "credential_replace_x"
+)
+
+// Field is a custom form field carried in the link (mode "custom", and the two steps above).
 type Field struct {
 	Name   string `json:"name"`
 	Label  string `json:"label"`
@@ -75,7 +89,7 @@ type Round struct {
 	LinkCodes  []string
 	LinkDigits int
 
-	Fields []Field // only for mode custom
+	Fields []Field // only for a step that CarriesFields
 }
 
 // MaxSiteLen is how much of the site name the page keeps. The seal binds the site name, so the server must bind
@@ -118,7 +132,7 @@ func LinkChecked(pageURL string, r Round) (string, error) {
 	if r.FactorDigits > 0 {
 		v.Set("t", fmt.Sprint(r.FactorDigits))
 	}
-	if r.Mode == "custom" {
+	if CarriesFields(r.Mode) {
 		b, _ := json.Marshal(r.Fields)
 		v.Set("fields", enc.EncodeToString(b))
 	}

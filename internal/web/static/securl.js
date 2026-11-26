@@ -6,7 +6,7 @@
 // (parameter "t"), a code typed by the person (a long-period TOTP code from their authenticator) is stretched
 // (PBKDF2) and mixed into the AES key as well; the code itself is never sent anywhere.
 (function () {
-  const PAGE_VERSION = '2';
+  const PAGE_VERSION = '3';
   const $ = (id) => document.getElementById(id);
 
   // Refuse to run inside a frame (a hostile page could otherwise overlay or frame it).
@@ -38,13 +38,25 @@
       { name: 'password', label: 'Password', type: 'password', ac: 'off' }] },
     totp: { label: 'Two-factor code', fields: [
       { name: 'code', label: 'One-time code', type: 'text', ac: 'one-time-code', numeric: true }] },
+    // The two steps that add a driver's own fields (a salt, say) to the sign-in of remembered credentials. Each is the step of
+    // the same name without "_x" with the driver's fields added after its own; the driver's fields come from the link and are
+    // checked below (parseExtras), everything else about them is fixed here.
+    credential_setup_x: { base: 'credential_setup', extras: true },
+    credential_replace_x: { base: 'credential_replace', extras: true },
     // The vault step asks for the one value that opens everything login keeps. Its wording and its single field are fixed
     // here and never read from the link: a link that could choose what is shown above this input could ask for anything.
     vault: { label: 'Unlock the vault', fixedTitle: true, fields: [
       { name: 'passphrase', label: 'Vault passphrase', type: 'password', ac: 'off' }] },
   };
   const FIELD_NAME = /^[a-z_][a-z0-9_]{0,31}$/;
+  // A field a driver adds is a plain name (a letter first) and never one that this page or the server already uses; the list is the
+  // same as site.ReservedFieldNames on the server.
+  const EXTRA_NAME = /^[a-z][a-z0-9_]{0,31}$/;
+  const RESERVED_NAMES = new Set(['username', 'password', 'remember', 'remember_totp', 'totp_secret', 'code', 'verifyvalue', 'confirm']);
   const MODE_NAME = /^[a-z0-9_-]{1,32}$/;
+
+  // baseOf is what a step shows: an extras step shows what its base step shows, and its extra fields follow.
+  function baseOf(mode) { const m = MODES[mode]; return m && m.base ? MODES[m.base] : m; }
   const ROUND = /^[1-9][0-9]{0,3}$/;
   const IMAGE_URL = /^data:image\/(png|jpeg|gif);base64,[A-Za-z0-9+/]+=*$/;
   const LINK_VERSION = '2';
@@ -111,8 +123,11 @@
         const image = (typeof f.image === 'string' && f.image.length < MAX_IMAGE && IMAGE_URL.test(f.image)) ? f.image : '';
         return { name: f.name, label: String(f.label || f.name).slice(0, 60), type: f.secret ? 'password' : 'text', ac: 'off', image };
       });
+    } else if (MODES[mode] && MODES[mode].extras) {
+      // an extras step is its base step and the fields the link names, which must be there
+      fields = baseOf(mode).fields.concat(parseExtras(p.get('fields')));
     } else if (MODES[mode]) {
-      if (MODES[mode].fixedTitle && p.has('fields')) throw new Error('This step does not take a field list. Do not continue.');
+      if (p.has('fields')) throw new Error('This step does not take a field list. Do not continue.');
       fields = MODES[mode].fields;
     } else {
       throw new Error('Unknown step "' + mode.slice(0, 32) + '".');
@@ -146,6 +161,23 @@
       return Object.assign(base, { locked: true, unlockDigits: parseInt(p.get('c'), 10), blob });
     }
     return Object.assign(base, parseSecret({ site: p.get('site') || '', u: p.get('u') || '', s: p.get('s') || '' }));
+  }
+
+  // parseExtras reads the fields a driver adds to a sign-in. Each is a secret of a plain name, shown as a password input: a link can
+  // not make this page ask for anything but secrets under names it does not use itself, nor show an image or a sentence of its own
+  // above an input (the label is cut and is text only).
+  function parseExtras(text) {
+    let raw;
+    try { raw = JSON.parse(new TextDecoder().decode(b64urlToBytes(text || ''))); }
+    catch (e) { throw new Error('Bad field list in link.'); }
+    if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_FIELDS) throw new Error('Bad field list in link.');
+    const seen = new Set();
+    return raw.map((f) => {
+      if (!f || !EXTRA_NAME.test(f.name || '') || RESERVED_NAMES.has(f.name) || seen.has(f.name)) throw new Error('Bad field name in link.');
+      if (f.secret !== true || f.image) throw new Error('Bad field in link.');
+      seen.add(f.name);
+      return { name: f.name, label: String(f.label || f.name).slice(0, 60), type: 'password', ac: 'off', image: '' };
+    });
   }
 
   // parseSecret validates the parameters that are hidden in an encrypted link: the site name, the tunnel address and the
@@ -231,10 +263,13 @@
   function render() {
     $('paste').hidden = true;
     $('main').hidden = false;
-    const label = ctx.mode === 'custom' ? 'Additional information' : MODES[ctx.mode].label;
-    const fixed = ctx.mode !== 'custom' && MODES[ctx.mode].fixedTitle;
+    const shown = ctx.mode === 'custom' ? null : baseOf(ctx.mode);
+    const label = ctx.mode === 'custom' ? 'Additional information' : shown.label;
+    const fixed = ctx.mode !== 'custom' && shown.fixedTitle;
+    // an extras step behaves, everywhere below, as the step it extends
+    const mode = ctx.mode !== 'custom' && MODES[ctx.mode].base ? MODES[ctx.mode].base : ctx.mode;
     // A fixed step shows no text that came from the link: not even the site name, which an attacker could write a sentence into.
-    const managed = ['credential_setup', 'credential_replace', 'credential_totp', 'daily_approval'].includes(ctx.mode);
+    const managed = ['credential_setup', 'credential_replace', 'credential_totp', 'daily_approval'].includes(mode);
     const grant = managed ? /^(https:\/\/[^\s]+)(?: \| Identity provider: (https:\/\/[^\s]+))? \| Grant: ([0-9.hmsµun]+)$/.exec(ctx.site) : null;
     if (managed && !grant) throw new Error('Missing or invalid authorization duration. Ask for a new login.');
     const siteLabel = grant ? grant[1] : ctx.site;
@@ -255,23 +290,23 @@
 
     const box = $('fields');
     box.textContent = '';
-    if (ctx.mode === 'credential_setup' || ctx.mode === 'credential_replace' || ctx.mode === 'daily_approval') {
+    if (mode === 'credential_setup' || mode === 'credential_replace' || mode === 'daily_approval') {
       const note = document.createElement('p');
-      note.textContent = ctx.mode === 'daily_approval'
+      note.textContent = mode === 'daily_approval'
         ? 'Approve access for the duration shown above using saved credentials. Update or forget them if needed. Reject does not create or extend a grant. To end an existing grant, close the session or forget the credentials.'
-        : (ctx.mode === 'credential_replace'
+        : (mode === 'credential_replace'
           ? 'Replacing credentials saves your new username and password after successful sign-in. Select Remember TOTP only if you also want to save the authenticator setup secret. Otherwise the previous saved TOTP secret is removed after successful replacement.'
           : 'Remember credentials saves your username and password in the encrypted vault after successful sign-in. Remember TOTP is a separate optional choice: select it only if you want to save your authenticator setup secret. The first grant lasts for the duration shown above.');
       box.append(note);
     }
-    if (ctx.mode === 'credential_totp') {
+    if (mode === 'credential_totp') {
       const note = document.createElement('p');
       note.textContent = 'Enter a one-time code, or select Remember TOTP to save your authenticator setup secret and generate future codes automatically. One-time codes are never saved.';
       box.append(note);
     }
-    $('submit').textContent = ctx.mode === 'daily_approval' ? 'Approve' : (ctx.mode === 'credential_replace' ? 'Replace and authorize' : (ctx.mode === 'credential_setup' ? 'Sign in' : 'Submit'));
-    $('replace-credentials').hidden = ctx.mode !== 'daily_approval';
-    $('forget-credentials').hidden = ctx.mode !== 'daily_approval';
+    $('submit').textContent = mode === 'daily_approval' ? 'Approve' : (mode === 'credential_replace' ? 'Replace and authorize' : (mode === 'credential_setup' ? 'Sign in' : 'Submit'));
+    $('replace-credentials').hidden = mode !== 'daily_approval';
+    $('forget-credentials').hidden = mode !== 'daily_approval';
     ctx.fields.forEach((f) => {
       const l = document.createElement('label');
       l.htmlFor = 'f-' + f.name;
