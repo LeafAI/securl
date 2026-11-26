@@ -99,6 +99,24 @@ type CredentialScope interface {
 	RememberScope() (binding string, origin *url.URL)
 }
 
+// LoginExtras is implemented by a driver whose login takes more than a username and a password (a salt that is typed with the
+// credentials, say). The fields are asked for in the same "login" round, on the same page and with the same care as the password:
+// they are saved only if the person chooses to remember credentials, in the vault beside the password, and are given back to the
+// driver in the same round on a later login. A driver without extras is unchanged.
+//
+// A name is lower-case letters, digits and underscores, starts with a letter, and is not one of the names securl uses itself.
+// A field is always asked for and never empty. It is shown as a secret, because a driver asks for it with the credentials and the
+// page cannot tell a salt from a password.
+type LoginExtras interface {
+	LoginExtraFields() []Field
+}
+
+// ReservedFieldNames are what securl's own pages and rounds use, and so what an extra field may not be called.
+var ReservedFieldNames = map[string]bool{
+	"username": true, "password": true, "remember": true, "remember_totp": true, "totp_secret": true, "code": true,
+	"verifyvalue": true, "confirm": true,
+}
+
 // Configurable drivers accept per-site options from the `site_options:` config section.
 type Configurable interface {
 	Configure(opts map[string]string)
