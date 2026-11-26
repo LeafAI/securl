@@ -139,6 +139,13 @@ revision without changing the application version. Without `VERSION`, the Makefi
 without an architecture, it uses `go env GOARCH`. Rebuild with a higher version/release and install with `apt` / `dnf`
 again to upgrade. Local packages are not release-signed artifacts: trust the source/build origin before installing.
 
+A login driver for a system of your own (an internal console, in a private repository) can be **built in** with
+`make rpm DRIVERS="gitlab.example.com/group/repo@v1.2.0"` (also `make deb` and `make macos`, or `go run generate.go --driver ... -- <build command>`).
+Each driver is `host/path@revision`, cloned over ssh, and the revision is pinned: a version tag or a full commit hash. Nothing in
+the repository changes, `securl version` lists the drivers and their commits, and the official nightly build refuses to be made with
+one. A driver runs inside the process that holds every credential, so write access to its repository is write access to securl:
+see [`docs/DRIVERS.md`](docs/DRIVERS.md), which also shows how to write one.
+
 Both packages install `/usr/bin/securl` and a **user-level** systemd unit, not a root/system service. They start or
 restart it for active non-root users with a session bus, and enable it for future user logins. An existing vault starts
 locked; a fresh account reports `not_initialized`. Packages never create a passphrase or overwrite configuration.
