@@ -586,6 +586,15 @@ The record includes the driver, username, password, optional Base32-decoded TOTP
 a random revision, the UTC approval instant and the granted duration. Enrollment, removal and revocation invalidate previous revisions.
 Human consent is obtained using the existing sealed, one-shot browser flow in `credential_setup`, `credential_replace`, `credential_totp` or `daily_approval` mode. Enrollment is opt-in and the initial grant is committed only after successful upstream login. The
 authorization is committed using a cross-process compare-and-swap against the exact record that was offered.
+A driver may ask for fields beside the username and the password in its login round (`site.LoginExtras`: a salt that is typed with
+the credentials, say). They are asked on the page with the same care as the password (always secret, autocomplete off, sealed in the
+same envelope), saved in the same record only when the person chooses to remember credentials, and handed back to the driver in the
+same round on a later login. The person is asked on `credential_setup_x` or `credential_replace_x`, which are the steps of the same
+name with the driver's fields added after the page's own; the fields travel in the link and the page checks them (a plain name, never
+one the page or the server uses, always secret, no image). Everything else about the page stays fixed: a step with a form of its own
+refuses a field list in the link, so a link cannot add an input to it. The record's binding includes the names of the extras, so a
+driver that later asks for other fields cannot use an old record, and a record saved before it asked for a salt is never used with the
+salt left out or sent empty: the person is asked again. A value is never written to an answer, an error, the audit log or a message.
 Its fixed lifetime (security.credential_authorization_ttl, default 24h) is not extended by upstream login, probing, cookie rotation or requests. The duration displayed in the consent page is bound into the existing sealed round. Configuration changes affect subsequent grants only.
 
 Sessions carry the revision and approval instant internally. Cache reuse requires the current vault grant;

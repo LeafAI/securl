@@ -154,7 +154,7 @@ Output (`oneOf` by `status`)
 
 // status = "pending"
 { "status":"pending", "login_id":"lg_3f9a...", "site":"gitlab",
-  "waiting_for":"login" | "totp" | "custom" | "credential_setup" | "credential_replace" | "credential_totp" | "daily_approval",      // the current round
+  "waiting_for":"login" | "totp" | "custom" | "credential_setup" | "credential_setup_x" | "credential_replace" | "credential_replace_x" | "credential_totp" | "daily_approval",      // the current round
   "round":1, "expires_at":"2026-10-10T08:10:00Z", // when the human link stops working
   "next_tool":"session_wait",
   "link":"https://...#...", "key_code":"8885 4F38 DA77 58C0", "instruction":"..." }   // only with link_via_agent, see below
