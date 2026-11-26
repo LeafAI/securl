@@ -45,11 +45,18 @@ func (s *Server) request(ctx context.Context, _ *mcp.CallToolRequest, in Request
 	if !s.cfg.Security.AllowArcheryRequests && s.isArchery(siteName, base) {
 		return nil, archeryRequestRefusal()
 	}
+	driver, _ := site.Resolve(siteName, base)
+	factor, terr := s.secondFactorFor(k, driver, base, sess)
+	if terr != nil {
+		s.audit.Record(audit.Event{Event: "request", Site: siteName, Host: base.Host, Method: in.Method, Path: in.Path, Result: terr.Code, SecondFactor: true})
+		return nil, terr
+	}
 	px := &proxy.Proxy{HC: s.grantClient(s.hc, base, sess.ApprovalID), MaxResponseBytes: in.MaxResponseBytes}
 	res, err := px.Do(ctx, sess, proxy.Request{
 		Base: base, Method: in.Method, Path: in.Path, Query: multiValues(in.Query), Headers: in.Headers,
 		JSON: in.JSON, Form: multiValues(in.Form), Text: in.Text, Base64: in.Base64,
 		FollowRedirects: in.FollowRedirects, Timeout: time.Duration(in.TimeoutSeconds) * time.Second,
+		SecondFactor: factor,
 	})
 	if err != nil {
 		if sess.ApprovalID != "" {
@@ -63,8 +70,11 @@ func (s *Server) request(ctx context.Context, _ *mcp.CallToolRequest, in Request
 	if res.NewSession != nil {
 		k.cache.Update(base, res.NewSession)
 	}
+	if factor != nil && res.CodeRefused {
+		k.refused.refuse(site.Key(base), sess.ApprovalID)
+	}
 	s.audit.Record(audit.Event{Event: "request", Site: siteName, Host: base.Host, Method: in.Method, Path: res.FinalPathOr(in.Path),
-		Status: res.Status, Bytes: res.TotalBytes})
+		Status: res.Status, Bytes: res.TotalBytes, SecondFactor: factor != nil})
 	out := RequestOutput{Status: res.Status, Headers: res.Headers, Body: res.Body, BodyIsBase64: res.BodyIsBase64,
 		Truncated: res.Truncated, TotalBytes: res.TotalBytes, Redactions: res.Redactions, Withheld: res.Withheld, FinalPath: res.FinalPath}
 	if res.Status == 401 {

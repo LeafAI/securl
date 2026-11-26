@@ -107,6 +107,7 @@ type core struct {
 	telegram *telegramBots   // what each Telegram bot has been told and has sent; it ends with the vault being open
 	dingtalk *dingtalkGroups // the send window of each DingTalk group; it ends with the vault being open
 	zulip    *zulipServers   // the send window of each Zulip server's bot; it ends with the vault being open
+	refused  *refusedGrants  // the grants under which a site refused a one-time code; it ends with the vault being open
 
 	linkTOTP, sealTOTP bool // which TOTP factors are on (reported by the policy resource; never their secrets)
 }

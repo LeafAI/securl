@@ -75,7 +75,25 @@ type Request struct {
 	Base64          string
 	FollowRedirects bool
 	Timeout         time.Duration
+
+	// SecondFactor, when set, puts a one-time code on the request (see SecondFactor).
+	SecondFactor *SecondFactor
 }
+
+// SecondFactor asks for a one-time code in a header of the request, for a site that checks one on its calls. The code is made once,
+// at the last moment, for the request that is going out: not for one that is refused first, and not again for a redirect that is
+// followed, because a site may take a code it sees twice for a replay and counts each wrong one against the account.
+type SecondFactor struct {
+	Header string
+	Code   func() (string, error)
+	// Refused, when set, is asked about the final answer (its status and the start of its body, at most RefusalBodyBytes) and says
+	// whether the site refused the code. The answer is the site's own, before anything is removed from it, because a refusal may be
+	// read from a value that is then scrubbed; the driver gets no more of it than that, and the agent none of this.
+	Refused func(status int, body []byte) bool
+}
+
+// RefusalBodyBytes is how much of the start of an answer a driver is shown when it is asked whether the site refused the code.
+const RefusalBodyBytes = 2048
 
 // Result is what the agent gets. It holds nothing secret.
 type Result struct {
@@ -91,6 +109,9 @@ type Result struct {
 
 	// NewSession is the session with the cookies the site rotated. It is for the caller to store; it is never serialised.
 	NewSession *site.Session `json:"-"`
+
+	// CodeRefused says that the request carried a one-time code and the site refused it. It is for the caller; it is never serialised.
+	CodeRefused bool `json:"-"`
 }
 
 // FinalPathOr is where the request ended up, or fallback when it did not move (a path, never a query string).
@@ -142,10 +163,12 @@ func invalid(format string, a ...any) error {
 var allowedMethods = map[string]bool{"GET": true, "HEAD": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true, "OPTIONS": true}
 
 // forbidden are the headers an agent may not set: those that carry or steer credentials, and those that frame the message.
+// x-ga-code is the header a second-factor code travels in (the admin console's): the code is made here, from a seed the agent never
+// holds, for the one request that needs it, so an agent can neither pass on a code it was told nor try codes against an account.
 var forbidden = map[string]bool{
 	"cookie": true, "authorization": true, "proxy-authorization": true, "host": true, "content-length": true,
 	"transfer-encoding": true, "connection": true, "proxy-connection": true, "upgrade": true, "te": true, "expect": true,
-	"accept-encoding": true, "trailer": true, "keep-alive": true,
+	"accept-encoding": true, "trailer": true, "keep-alive": true, "x-ga-code": true,
 }
 
 func isToken(s string) bool {
@@ -543,6 +566,40 @@ func portOf(u *url.URL) string {
 	return "80"
 }
 
+// securlOwnHeader says whether a header is one that securl sets for its own reasons (the credentials and the framing of the message),
+// which a driver cannot ask for the code to be written into. x-ga-code is on the list of what an agent may not set only because
+// securl is the one that sets it; it is exactly the header a driver may name.
+func securlOwnHeader(h string) bool {
+	h = strings.ToLower(h)
+	return forbidden[h] && h != "x-ga-code"
+}
+
+// ErrSecondFactor is returned when the code a request needs could not be made; nothing was sent.
+var ErrSecondFactor = errors.New("the one-time code the site wants could not be made")
+
+// codeOf makes the code and checks it is something that can sit in a header: a few ASCII letters or digits, never anything that
+// could end the header or start another.
+func (sf *SecondFactor) codeOf() (string, error) {
+	// isToken refuses an empty name as well; the first test says so in words, and either alone gives the same answer.
+	if sf.Header == "" || sf.Code == nil || !isToken(sf.Header) || securlOwnHeader(sf.Header) {
+		return "", invalid("the second factor is not set up as a header of its own")
+	}
+	code, err := sf.Code()
+	if err != nil {
+		return "", ErrSecondFactor
+	}
+	if len(code) < 4 || len(code) > 16 {
+		return "", ErrSecondFactor
+	}
+	for i := 0; i < len(code); i++ {
+		c := code[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
+			return "", ErrSecondFactor
+		}
+	}
+	return code, nil
+}
+
 // Do sends the request with the session's credentials and returns the scrubbed answer.
 func (p *Proxy) Do(ctx context.Context, sess *site.Session, r Request) (*Result, error) {
 	if sess == nil {
@@ -565,7 +622,23 @@ func (p *Proxy) Do(ctx context.Context, sess *site.Session, r Request) (*Result,
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 	st := &state{sess: sess, cookies: cloneCookies(sess.Cookies), secrets: secretsOf(sess)}
+	if r.SecondFactor != nil {
+		code, err := r.SecondFactor.codeOf()
+		if err != nil {
+			return nil, err
+		}
+		// The code goes on the request after everything that can refuse it has had its say, and into what is scrubbed from the answer.
+		// prepare made this header for this request alone, so the copy changes nothing today; it stays so that a header that is ever
+		// shared between requests cannot come to carry another request's code.
+		pr.header = pr.header.Clone()
+		pr.header.Set(r.SecondFactor.Header, code)
+		st.secrets = append(st.secrets, code)
+	}
 	origin, method, u, body, hdr := pr.url, pr.method, pr.url, pr.body, pr.header
+	var factor *SecondFactor
+	if r.SecondFactor != nil {
+		factor = r.SecondFactor
+	}
 	for hop := 0; ; hop++ {
 		resp, err := p.send(ctx, &client, st, method, u, hdr, body)
 		if err != nil {
@@ -574,7 +647,7 @@ func (p *Proxy) Do(ctx context.Context, sess *site.Session, r Request) (*Result,
 		st.apply(resp.Cookies(), u.Hostname(), time.Now())
 		next, nmethod, nbody := p.follow(r, resp, u, origin, method, body)
 		if next == nil {
-			return p.finish(resp, st, u)
+			return p.finish(resp, st, u, factor)
 		}
 		if hop >= maxRedirects {
 			resp.Body.Close()
@@ -651,7 +724,7 @@ func (p *Proxy) send(ctx context.Context, client *http.Client, st *state, method
 }
 
 // finish reads and scrubs the final response.
-func (p *Proxy) finish(resp *http.Response, st *state, u *url.URL) (*Result, error) {
+func (p *Proxy) finish(resp *http.Response, st *state, u *url.URL, factor *SecondFactor) (*Result, error) {
 	defer resp.Body.Close()
 	scrub := redact.New(st.secrets)
 	max := p.maxResponse()
@@ -674,6 +747,13 @@ func (p *Proxy) finish(resp *http.Response, st *state, u *url.URL) (*Result, err
 	}
 	hdr, hn := scrub.Header(resp.Header)
 	res := &Result{Status: resp.StatusCode, Headers: hdr, Redactions: hn, TotalBytes: total, NewSession: st.newSession()}
+	if factor != nil && factor.Refused != nil {
+		head := buf
+		if len(head) > RefusalBodyBytes {
+			head = head[:RefusalBodyBytes]
+		}
+		res.CodeRefused = factor.Refused(resp.StatusCode, head)
+	}
 	if u != nil {
 		res.FinalPath = u.Path
 	}

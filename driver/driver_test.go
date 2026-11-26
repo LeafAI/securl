@@ -26,6 +26,8 @@ func TestEveryExportedTypeIsTheSameTypeAsTheInternalOne(t *testing.T) {
 		"Detailer":        {reflect.TypeFor[driver.Detailer](), reflect.TypeFor[site.Detailer]()},
 		"Inspector":       {reflect.TypeFor[driver.Inspector](), reflect.TypeFor[site.Inspector]()},
 		"Configurable":    {reflect.TypeFor[driver.Configurable](), reflect.TypeFor[site.Configurable]()},
+		"LoginExtras":     {reflect.TypeFor[driver.LoginExtras](), reflect.TypeFor[site.LoginExtras]()},
+		"SecondFactor":    {reflect.TypeFor[driver.SecondFactor](), reflect.TypeFor[site.SecondFactor]()},
 	} {
 		if pair[0] != pair[1] {
 			t.Errorf("driver.%s is %v, not %v: it must be an alias", name, pair[0], pair[1])
@@ -166,4 +168,35 @@ func contains(l []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// The reserved names are handed out as a copy: a driver that changes the list it was given must not change what the next one may use.
+func TestTheReservedFieldNamesAreTheInternalOnesAndACopy(t *testing.T) {
+	got := driver.ReservedFieldNames()
+	if len(got) != len(site.ReservedFieldNames) {
+		t.Fatalf("%v", got)
+	}
+	for _, n := range got {
+		if !site.ReservedFieldNames[n] {
+			t.Errorf("%q is not reserved inside", n)
+		}
+	}
+	for _, want := range []string{"username", "password", "remember", "remember_totp", "totp_secret", "code", "verifyvalue", "confirm"} {
+		found := false
+		for _, n := range got {
+			found = found || n == want
+		}
+		if !found {
+			t.Errorf("%q is reserved by the pages and is not listed", want)
+		}
+	}
+	for i := range got {
+		got[i] = "tampered"
+	}
+	for _, n := range driver.ReservedFieldNames() {
+		if n == "tampered" {
+			t.Error("a change leaked into the shared list")
+		}
+	}
+	delete(site.ReservedFieldNames, "nonexistent")
 }

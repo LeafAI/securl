@@ -111,6 +111,21 @@ type LoginExtras interface {
 	LoginExtraFields() []Field
 }
 
+// SecondFactor is implemented by a driver whose site wants a one-time code from an authenticator in the header of its requests, not
+// only when logging in (an admin console that checks a code on the calls that matter, and ignores it on the others). The driver says
+// which header and how many digits, and how to tell that the site refused the code; securl makes the code, from the seed the person
+// chose to save with their credentials, and puts it on each request while the person's approval is in force. The driver never sees
+// the seed or a code, and an agent can neither send one nor learn one: the header is refused in what an agent supplies, and a code
+// is scrubbed from what the site answers.
+//
+// A code the site refused is not tried again and again: a site that locks an account after a few wrong codes would lock it. After
+// one refusal securl sends nothing more with a code until the person approves again.
+type SecondFactor interface {
+	SecondFactorHeader() (name string, digits int)
+	// CodeRefused says whether an answer (its HTTP status and the start of its body) is the site refusing the code.
+	CodeRefused(status int, body []byte) bool
+}
+
 // ReservedFieldNames are what securl's own pages and rounds use, and so what an extra field may not be called.
 var ReservedFieldNames = map[string]bool{
 	"username": true, "password": true, "remember": true, "remember_totp": true, "totp_secret": true, "code": true,

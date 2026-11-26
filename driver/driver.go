@@ -47,6 +47,10 @@ type (
 	Inspector = site.Inspector
 	// Configurable takes the per-site options of the site_options section of the configuration.
 	Configurable = site.Configurable
+	// LoginExtras lets the driver ask for more than a username and a password in its login round (a salt, say).
+	LoginExtras = site.LoginExtras
+	// SecondFactor makes securl put a one-time code, made from the seed the person saved, on the driver's site's requests.
+	SecondFactor = site.SecondFactor
 )
 
 // The errors a driver wraps so that securl can tell what went wrong.
@@ -55,6 +59,15 @@ var (
 	ErrLoginRejected  = site.ErrLoginRejected
 	ErrUnreachable    = site.ErrUnreachable
 )
+
+// ReservedFieldNames are the names securl's own pages use, which a field a driver asks for may not have. It is a copy.
+func ReservedFieldNames() []string {
+	var out []string
+	for n := range site.ReservedFieldNames {
+		out = append(out, n)
+	}
+	return out
+}
 
 // Register adds a driver. It panics if the name is taken, so two drivers can never share one.
 func Register(d Driver) { site.Register(d) }
